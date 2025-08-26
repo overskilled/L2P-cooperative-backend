@@ -8,6 +8,14 @@ export class SignupDto {
     @IsString()
     username?: string;
 
+    @IsOptional()
+    @IsString()
+    roleType?: string;
+    
+    @IsOptional()
+    @IsString()
+    profile?: string;
+    
     @IsNotEmpty()
     @MinLength(6)
     password: string;

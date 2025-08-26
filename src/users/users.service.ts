@@ -1,26 +1,84 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from 'prisma/prisma.service';
+import { SignupDto } from 'src/dto/signup.dto';
+import { RoleType } from 'src/types/user';
 
-export type User = {
-    userId: string
-    username: string
-    password: string
-}
+import * as bcrypt from 'bcrypt';
+import { PaginatedResponse, PaginationDto } from 'src/dto/pagination.dto';
 
 @Injectable()
 export class UsersService {
-    async findUserByName(username: string): Promise<User | undefined> {
-        const users: User[] = [
-            {
-                userId: '1',
-                username: 'john',
-                password: 'changeme',
+    constructor(private prisma: PrismaService) { }
+
+    // =====================
+    // USER MANAGEMENT
+    // =====================
+
+    async getUsers(dto: PaginationDto, role?: RoleType) {
+        const page = Number(dto.page) || 1;
+        const limit = Number(dto.limit) || 10;
+
+        const skip = (page - 1) * limit;
+        const take = limit;
+
+
+        const [users, total] = await Promise.all([
+            this.prisma.user.findMany({
+                where: {
+                    roleType: role || undefined,
+                },
+                skip,
+                take,
+                orderBy: { createdAt: 'desc' },
+            }),
+            this.prisma.user.count({
+                where: {
+                    roleType: role || undefined,
+                },
+            }),
+        ]);
+
+        // Strip passwords safely
+        const safeUsers = users.map(({ password, ...rest }) => rest);
+
+        return new PaginatedResponse(safeUsers, total, dto);
+    }
+
+
+    async getUserById(id: string) {
+        const user = await this.prisma.user.findUnique({
+            where: { id },
+        });
+
+        if (!user) throw new NotFoundException('User not found');
+
+        const { password, ...safeUser } = user;
+        return safeUser;
+    }
+
+    async createUser(dto: SignupDto) {
+        const hashedPassword = await bcrypt.hash(dto.password, 10);
+        return true
+    }
+
+    async updateUser(id: string, dto: Partial<SignupDto>) {
+        const user = await this.prisma.user.findUnique({ where: { id } });
+        if (!user) throw new NotFoundException('User not found');
+
+        return true
+    }
+
+    async softDeleteUser(id: string) {
+        const user = await this.prisma.user.findUnique({ where: { id } });
+        if (!user) throw new NotFoundException('User not found');
+
+        // Soft delete = we keep the record but mark as deleted
+        return this.prisma.user.update({
+            where: { id },
+            data: {
+                email: `deleted_${Date.now()}_${user.email}`, // to preserve unique constraint
+                username: null,
             },
-            {
-                userId: '2',
-                username: 'maria',
-                password: 'guess',
-            },
-        ];
-        return users.find(user => user.username === username);
+        });
     }
 }

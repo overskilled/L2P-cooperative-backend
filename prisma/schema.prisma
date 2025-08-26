@@ -7,7 +7,11 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum RoleType {
+//
+// ====================
+// ENUMS
+// ====================
+export enum RoleType {
   USER
   MEMBER
   TELLER
@@ -28,6 +32,31 @@ enum AccountType {
   PLACEMENT
 }
 
+enum TransactionType {
+  DEPOSIT
+  WITHDRAWAL
+  TRANSFER
+  FEE
+  INTEREST
+}
+
+enum TransactionStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  REVERSED
+}
+
+enum VerificationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+//
+// ====================
+// MODELS
+// ====================
 model User {
   id        String   @id @default(uuid())
   email     String   @unique
@@ -39,8 +68,11 @@ model User {
   contacts  EmergencyContact[]
   accounts  Account[]
   jointInfo JointAccountInfo?
-
   documents Document?
+
+  verifications Verification[]
+  transactions  Transaction[] // user’s initiated transactions (sender)
+  auditLogs     AuditLog[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -57,7 +89,7 @@ model Profile {
   birthPlace  String?
   nationality String?
   resident    String?
-  ppe         String?
+  ppe         String?       // Politically Exposed Person
   idNumber    String?
   idIssuer    String?
   idDate      DateTime?
@@ -91,13 +123,22 @@ model Account {
   user     User   @relation(fields: [userId], references: [id])
 
   type     AccountType
-  active   Boolean @default(false)
+  balance  Decimal @db.Decimal(18,2) @default(0.00)
+  active   Boolean @default(true)
+
+  // add opposite sides of the two relations
+  outgoingTransactions Transaction[] @relation("FromAccountTransactions")
+  incomingTransactions Transaction[] @relation("ToAccountTransactions")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt @default(now())
 }
 
 model JointAccountInfo {
   id       String @id @default(uuid())
   userId   String   @unique
   user     User     @relation(fields: [userId], references: [id])
+  status   String @default("INACTIVE")
 
   accountType   String?
   holder1Name   String?
@@ -130,7 +171,6 @@ model JointAccountInfo {
   terms2Accepted Boolean? @default(false)
 }
 
-
 model Document {
   id       String @id @default(uuid())
   userId   String   @unique
@@ -138,4 +178,59 @@ model Document {
 
   frontCNI String? // file path or base64
   backCNI  String?
+}
+
+//
+// ====================
+// CORE BANKING ADDITIONS
+// ====================
+
+// Track deposits, withdrawals, transfers
+model Transaction {
+  id          String @id @default(uuid())
+  type        TransactionType
+  status      TransactionStatus @default(PENDING)
+
+  amount      Decimal @db.Decimal(18,2)
+  description String?
+
+  // Account relations
+  fromAccountId String?
+  fromAccount   Account? @relation("FromAccountTransactions", fields: [fromAccountId], references: [id])
+
+  toAccountId   String?
+  toAccount     Account? @relation("ToAccountTransactions", fields: [toAccountId], references: [id])
+
+  userId      String?   // who initiated the transaction
+  user        User?     @relation(fields: [userId], references: [id])
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// For compliance & KYC verification workflow
+model Verification {
+  id        String @id @default(uuid())
+  userId    String
+  user      User   @relation(fields: [userId], references: [id])
+
+  status    VerificationStatus @default(PENDING)
+  verifiedBy String?           // admin/compliance officer
+  verifiedAt DateTime?
+  notes     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Optional: Track audit logs for compliance
+model AuditLog {
+  id        String @id @default(uuid())
+  action    String
+  entity    String
+  entityId  String
+  userId    String?
+  user      User? @relation(fields: [userId], references: [id])
+  timestamp DateTime @default(now())
+  metadata  Json?
 }
