@@ -160,6 +160,9 @@ export class AuthService {
                         backCNI: dto.backCNI,
                     },
                 } : undefined,
+                verification: {
+                    create: { status: 'PENDING' }, 
+                },
             },
             include: { profile: true, contacts: true, accounts: true, documents: true },
         });

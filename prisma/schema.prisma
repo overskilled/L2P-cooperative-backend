@@ -70,7 +70,7 @@ model User {
   jointInfo JointAccountInfo?
   documents Document?
 
-  verifications Verification[]
+  verifications Verification
   transactions  Transaction[] // user’s initiated transactions (sender)
   auditLogs     AuditLog[]
 
@@ -211,7 +211,7 @@ model Transaction {
 // For compliance & KYC verification workflow
 model Verification {
   id        String @id @default(uuid())
-  userId    String
+  userId    String @unique
   user      User   @relation(fields: [userId], references: [id])
 
   status    VerificationStatus @default(PENDING)
