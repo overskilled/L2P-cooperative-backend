@@ -62,6 +62,7 @@ export class SignupDto {
     @IsOptional() accountPlacement?: boolean;
 
     // Documents
-    @IsOptional() frontCNI?: string;
-    @IsOptional() backCNI?: string;
+    @IsOptional() type?: string;
+    @IsOptional() frontImage?: string;
+    @IsOptional() backImage?: string;
 }

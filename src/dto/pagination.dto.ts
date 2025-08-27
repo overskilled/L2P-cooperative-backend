@@ -27,13 +27,21 @@ export class PaginatedResponse<T> {
     sort: any;
 
     constructor(data: T[], total: number, dto: PaginationDto) {
+        const page = dto.page || 1;
+        const limit = dto.limit || 10;
+
         this.data = data;
-        this.currentPage = dto.page;
+        this.currentPage = page;
+        this.itemsPerPage = limit;
         this.totalItems = total;
-        this.itemsPerPage = dto.limit;
-        this.totalPages = Math.ceil(total / dto.limit);
-        this.remainingPages = Math.max(this.totalPages - dto.page, 0);
-        this.hasMore = dto.page < this.totalPages;
-        this.sort = dto.page < this.totalPages;
+
+        // Calculate total pages
+        this.totalPages = Math.ceil(total / limit);
+
+        // Calculate remaining pages
+        this.remainingPages = Math.max(this.totalPages - page, 0);
+
+        // Do we have more pages?
+        this.hasMore = page < this.totalPages;
     }
 }

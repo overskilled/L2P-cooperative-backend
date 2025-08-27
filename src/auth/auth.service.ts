@@ -154,17 +154,18 @@ export class AuthService {
                         { type: 'PLACEMENT', active: dto.accountPlacement ?? false },
                     ],
                 },
-                documents: dto.frontCNI || dto.backCNI ? {
+                documents: dto.frontImage || dto.backImage ? {
                     create: {
-                        frontCNI: dto.frontCNI,
-                        backCNI: dto.backCNI,
+                        type: dto.type ?? 'CNI',
+                        frontImage: dto.frontImage,
+                        backImage: dto.backImage,
                     },
                 } : undefined,
                 verification: {
                     create: { status: 'PENDING' }, 
                 },
             },
-            include: { profile: true, contacts: true, accounts: true, documents: true },
+            include: { profile: true, contacts: true, accounts: true, documents: true, verification: true },
         });
 
         const { password, ...safeUser } = user;

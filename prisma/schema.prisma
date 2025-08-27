@@ -11,7 +11,7 @@ datasource db {
 // ====================
 // ENUMS
 // ====================
-export enum RoleType {
+enum RoleType {
   USER
   MEMBER
   TELLER
@@ -53,63 +53,67 @@ enum VerificationStatus {
   REJECTED
 }
 
+enum DocumentType {
+  CNI
+  PASSPORT
+}
+
 //
 // ====================
 // MODELS
 // ====================
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  username  String?  @unique
-  password  String
-  roleType  RoleType @default(USER)
+  id       String   @id @default(uuid())
+  email    String   @unique
+  username String?  @unique
+  password String
+  roleType RoleType @default(USER)
 
-  profile   Profile?
-  contacts  EmergencyContact[]
-  accounts  Account[]
-  jointInfo JointAccountInfo?
-  documents Document?
-
-  verifications Verification
-  transactions  Transaction[] // user’s initiated transactions (sender)
-  auditLogs     AuditLog[]
+  profile      Profile?
+  contacts     EmergencyContact[]
+  accounts     Account[]
+  jointInfo    JointAccountInfo?
+  documents    Document?
+  verification Verification? // ✅ only one verification per user
+  transactions Transaction[]
+  auditLogs    AuditLog[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
 model Profile {
-  id        String   @id @default(uuid())
-  userId    String   @unique
-  user      User     @relation(fields: [userId], references: [id])
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id])
 
-  firstName   String?
-  lastName    String?
-  birthDate   DateTime?
-  birthPlace  String?
-  nationality String?
-  resident    String?
-  ppe         String?       // Politically Exposed Person
-  idNumber    String?
-  idIssuer    String?
-  idDate      DateTime?
-  phone       String?
-  address     String?
-  city        String?
-  profession  String?
-  employer    String?
+  firstName     String?
+  lastName      String?
+  birthDate     DateTime?
+  birthPlace    String?
+  nationality   String?
+  resident      String?
+  ppe           String?
+  idNumber      String?
+  idIssuer      String?
+  idDate        DateTime?
+  phone         String?
+  address       String?
+  city          String?
+  profession    String?
+  employer      String?
   maritalStatus String?
-  children    Int?
-  salary      Decimal? @db.Decimal(10,2)
+  children      Int?
+  salary        Decimal?  @db.Decimal(10, 2)
 
   signature     String?
   termsAccepted Boolean? @default(false)
 }
 
 model EmergencyContact {
-  id       String @id @default(uuid())
-  userId   String
-  user     User   @relation(fields: [userId], references: [id])
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
 
   name     String
   phone    String
@@ -118,50 +122,49 @@ model EmergencyContact {
 }
 
 model Account {
-  id       String @id @default(uuid())
-  userId   String
-  user     User   @relation(fields: [userId], references: [id])
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
 
-  type     AccountType
-  balance  Decimal @db.Decimal(18,2) @default(0.00)
-  active   Boolean @default(true)
+  type    AccountType
+  balance Decimal     @default(0.00) @db.Decimal(18, 2)
+  active  Boolean     @default(true)
 
-  // add opposite sides of the two relations
   outgoingTransactions Transaction[] @relation("FromAccountTransactions")
   incomingTransactions Transaction[] @relation("ToAccountTransactions")
 
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
 }
 
 model JointAccountInfo {
-  id       String @id @default(uuid())
-  userId   String   @unique
-  user     User     @relation(fields: [userId], references: [id])
-  status   String @default("INACTIVE")
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id])
+  status String @default("INACTIVE")
 
-  accountType   String?
-  holder1Name   String?
-  holder1Phone  String?
-  holder1Niu    String?
-  holder1Email  String?
-  holder1Address String?
+  accountType       String?
+  holder1Name       String?
+  holder1Phone      String?
+  holder1Niu        String?
+  holder1Email      String?
+  holder1Address    String?
   holder1Profession String?
-  holder1Employer  String?
-  holder1IdNumber  String?
-  holder1IdIssuer  String?
-  holder1IdDate    DateTime?
+  holder1Employer   String?
+  holder1IdNumber   String?
+  holder1IdIssuer   String?
+  holder1IdDate     DateTime?
 
-  holder2Name   String?
-  holder2Phone  String?
-  holder2Niu    String?
-  holder2Email  String?
-  holder2Address String?
+  holder2Name       String?
+  holder2Phone      String?
+  holder2Niu        String?
+  holder2Email      String?
+  holder2Address    String?
   holder2Profession String?
-  holder2Employer  String?
-  holder2IdNumber  String?
-  holder2IdIssuer  String?
-  holder2IdDate    DateTime?
+  holder2Employer   String?
+  holder2IdNumber   String?
+  holder2IdIssuer   String?
+  holder2IdDate     DateTime?
 
   signatureType  String?
   signature1     String?
@@ -172,65 +175,58 @@ model JointAccountInfo {
 }
 
 model Document {
-  id       String @id @default(uuid())
-  userId   String   @unique
-  user     User     @relation(fields: [userId], references: [id])
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id])
 
-  frontCNI String? // file path or base64
-  backCNI  String?
+  type       String @default("CNI")
+
+  frontImage String?
+  backImage  String?
 }
 
-//
-// ====================
-// CORE BANKING ADDITIONS
-// ====================
-
-// Track deposits, withdrawals, transfers
 model Transaction {
-  id          String @id @default(uuid())
-  type        TransactionType
-  status      TransactionStatus @default(PENDING)
+  id     String            @id @default(uuid())
+  type   TransactionType
+  status TransactionStatus @default(PENDING)
 
-  amount      Decimal @db.Decimal(18,2)
+  amount      Decimal @db.Decimal(18, 2)
   description String?
 
-  // Account relations
   fromAccountId String?
   fromAccount   Account? @relation("FromAccountTransactions", fields: [fromAccountId], references: [id])
 
-  toAccountId   String?
-  toAccount     Account? @relation("ToAccountTransactions", fields: [toAccountId], references: [id])
+  toAccountId String?
+  toAccount   Account? @relation("ToAccountTransactions", fields: [toAccountId], references: [id])
 
-  userId      String?   // who initiated the transaction
-  user        User?     @relation(fields: [userId], references: [id])
-
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-}
-
-// For compliance & KYC verification workflow
-model Verification {
-  id        String @id @default(uuid())
-  userId    String @unique
-  user      User   @relation(fields: [userId], references: [id])
-
-  status    VerificationStatus @default(PENDING)
-  verifiedBy String?           // admin/compliance officer
-  verifiedAt DateTime?
-  notes     String?
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
-// Optional: Track audit logs for compliance
+model Verification {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id])
+
+  status     VerificationStatus @default(PENDING)
+  verifiedBy String?
+  verifiedAt DateTime?
+  notes      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 model AuditLog {
-  id        String @id @default(uuid())
+  id        String   @id @default(uuid())
   action    String
   entity    String
   entityId  String
   userId    String?
-  user      User? @relation(fields: [userId], references: [id])
+  user      User?    @relation(fields: [userId], references: [id])
   timestamp DateTime @default(now())
   metadata  Json?
 }

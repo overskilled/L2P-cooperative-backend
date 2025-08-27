@@ -44,6 +44,24 @@ export class UsersService {
         return new PaginatedResponse(safeUsers, total, dto);
     }
 
+    async makeAdmin(userId: string) {
+        // First, find the user
+        const user = await this.prisma.user.findUnique({ where: { id: userId } });
+        if (!user) throw new NotFoundException('User not found');
+
+        // Update the user's role to ADMIN
+        const updatedUser = await this.prisma.user.update({
+            where: { id: userId },
+            data: {
+                roleType: 'ADMIN',
+            },
+        });
+
+        // Strip password before returning
+        const { password, ...safeUser } = updatedUser;
+        return safeUser;
+    }
+
 
     async getUserById(id: string) {
         const user = await this.prisma.user.findUnique({

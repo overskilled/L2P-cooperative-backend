@@ -9,12 +9,16 @@ import {
   ParseIntPipe,
   UseGuards,
   Query,
+  Patch,
+  ForbiddenException,
+  Req,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { SignupDto } from 'src/dto/signup.dto';
 import { AuthGuard } from 'src/auth/guards/auth.guard';
 import { PaginationDto } from 'src/dto/pagination.dto';
 import { ApiQuery } from '@nestjs/swagger';
+import { RoleType } from 'src/types/user';
 
 @Controller('users')
 export class UsersController {
@@ -43,6 +47,17 @@ export class UsersController {
   @UseGuards(AuthGuard)
   async create(@Body() createUserDto: SignupDto) {
     return this.usersService.createUser(createUserDto);
+  }
+
+  @UseGuards(AuthGuard)
+  @Patch(':id/make-admin')
+  async makeAdmin(@Param('id') userId: string, @Req() req: any) {
+    // Ensure the requesting user is an ADMIN
+    if (req.user.roleType !== RoleType.ADMIN) {
+      throw new ForbiddenException('Only admins can promote users');
+    }
+
+    return this.usersService.makeAdmin(userId);
   }
 
   // PUT /users/:id → update user details
