@@ -12,6 +12,7 @@ import {
   Patch,
   ForbiddenException,
   Req,
+  Request,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { SignupDto } from 'src/dto/signup.dto';
@@ -19,6 +20,7 @@ import { AuthGuard } from 'src/auth/guards/auth.guard';
 import { PaginationDto } from 'src/dto/pagination.dto';
 import { ApiQuery } from '@nestjs/swagger';
 import { RoleType } from 'src/types/user';
+import { AuthenticatedRequest } from 'src/auth/auth.service';
 
 @Controller('users')
 export class UsersController {
@@ -38,9 +40,17 @@ export class UsersController {
   // GET /users/:id → get user details
   @Get(':id')
   @UseGuards(AuthGuard)
-  async findOne(@Param() id: string) {
+  async findOne(@Param('id') id: string) {
     return this.usersService.getUserById(id);
   }
+  
+  @Get("profile")
+  @UseGuards(AuthGuard)
+  async profile(@Request() req) {
+    console.log("User Object from JWT:", req.user);
+    return this.usersService.getUserById(req.user.userId);
+  }
+
 
   // POST /users → create a new user
   @Post()

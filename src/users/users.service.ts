@@ -64,15 +64,25 @@ export class UsersService {
 
 
     async getUserById(id: string) {
+        console.log("Fetching user by ID:", id);
+
         const user = await this.prisma.user.findUnique({
-            where: { id },
+            where: { id: String(id) },
+            include: {
+                profile: true,
+                contacts: true,
+                accounts: true,
+                documents: true,
+                verification: true,
+            },
         });
 
-        if (!user) throw new NotFoundException('User not found');
+        if (!user) throw new NotFoundException("User not found");
 
         const { password, ...safeUser } = user;
         return safeUser;
     }
+
 
     async createUser(dto: SignupDto) {
         const hashedPassword = await bcrypt.hash(dto.password, 10);

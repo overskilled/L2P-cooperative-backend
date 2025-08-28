@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, ConflictException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, ConflictException, NotFoundException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { SignupDto } from 'src/dto/signup.dto';
 import { UsersService } from 'src/users/users.service';
@@ -19,6 +19,7 @@ type AuthResult = {
     accessToken: string
     userId: string
     username: string
+    user: any
 }
 
 type Contact = {
@@ -26,6 +27,13 @@ type Contact = {
     phone: string | null
     email: string | null
     relation: string | null
+}
+
+export interface AuthenticatedRequest extends Request {
+    user: {
+        userId: string;
+        username: string;
+    };
 }
 
 @Injectable()
@@ -77,11 +85,23 @@ export class AuthService {
 
         const accessToken = await this.jwtService.signAsync(tokenPayload);
 
+        const dbUser = await this.prismaService.user.findUnique({
+            where: { id: String(user.userId) },
+            include: { profile: true, contacts: true, accounts: true, documents: true, verification: true },
+        });
+
+        if (!dbUser) {
+            throw new NotFoundException("User not found");
+        }
+
+        const { password, ...safeUser } = dbUser;
+
         return {
             accessToken,
-            userId: user.userId,
-            username: user.username,
-        };
+            userId: dbUser.id,
+            username: dbUser.username ?? dbUser.email,
+            user: safeUser,
+        }
     }
 
 
@@ -162,7 +182,7 @@ export class AuthService {
                     },
                 } : undefined,
                 verification: {
-                    create: { status: 'PENDING' }, 
+                    create: { status: 'PENDING' },
                 },
             },
             include: { profile: true, contacts: true, accounts: true, documents: true, verification: true },
