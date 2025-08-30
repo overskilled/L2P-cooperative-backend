@@ -129,6 +129,7 @@ model Account {
   type    AccountType
   balance Decimal     @default(0.00) @db.Decimal(18, 2)
   active  Boolean     @default(true)
+  rib     String?      @unique
 
   outgoingTransactions Transaction[] @relation("FromAccountTransactions")
   incomingTransactions Transaction[] @relation("ToAccountTransactions")

@@ -1,9 +1,13 @@
 import { JwtService } from '@nestjs/jwt';
-import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from "@nestjs/common";
+import { CanActivate, ExecutionContext, Injectable, NotFoundException, UnauthorizedException } from "@nestjs/common";
+import { PrismaService } from 'prisma/prisma.service';
 
 @Injectable()
 export class AuthGuard implements CanActivate {
-    constructor(private JwtService: JwtService) { }
+    constructor(
+        private jwtService: JwtService,
+        private prisma: PrismaService
+    ) { }
 
     async canActivate(context: ExecutionContext) {
         const request = context.switchToHttp().getRequest();
@@ -14,15 +18,39 @@ export class AuthGuard implements CanActivate {
             throw new UnauthorizedException('Session token is missing');
         }
 
+
         try {
-            const tokenPayload = await this.JwtService.verifyAsync(token);
-            request.user = {
-                userId: tokenPayload.sub,
-                username: tokenPayload.username,
+            // Verify token
+            const tokenPayload = await this.jwtService.verifyAsync(token);
+
+            // Fetch user with role
+            const dbUser = await this.prisma.user.findUnique({
+                where: { id: String(tokenPayload.sub) },
+                include: {
+                    profile: true,
+                    contacts: true,
+                    accounts: true,
+                    documents: true,
+                    verification: true,
+                },
+            });
+
+            if (!dbUser) {
+                throw new NotFoundException("User not found");
             }
+
+            const { password, ...safeUser } = dbUser;
+
+            request.user = {
+                ...safeUser,
+                id: dbUser.id,
+                username: dbUser.username ?? dbUser.email,
+                role: dbUser.roleType, 
+            };
+
             return true;
         } catch (error) {
             throw new UnauthorizedException('Invalid or expired session token');
-        } 
+        }
     }
 }

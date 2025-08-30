@@ -34,6 +34,8 @@ export class UsersVerificationService {
                             email: true,
                             username: true,
                             roleType: true,
+                            profile: true,
+                            documents: true,
                         },
                     },
                 },
