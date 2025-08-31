@@ -1,5 +1,5 @@
 // src/accounts/accounts.controller.ts
-import { Controller, Post, Body, Param, Query, Get, Req, ForbiddenException, UseGuards } from '@nestjs/common';
+import { Controller, Post, Body, Param, Query, Get, Req, ForbiddenException, UseGuards, Request } from '@nestjs/common';
 import { AccountsService } from './accounts.service';
 import { AccountType, RoleType } from '@prisma/client';
 import { PaginationDto } from 'src/dto/pagination.dto';
@@ -9,13 +9,31 @@ import { AuthGuard } from 'src/auth/guards/auth.guard';
 export class AccountsController {
   constructor(private accountsService: AccountsService) { }
 
-  @Post(':userId/create')
+  @Post('open')
   @UseGuards(AuthGuard)
   async createAccount(
-    @Param('userId') userId: string,
-    @Body() body: { type: AccountType; bankId: string; agencyId: string },
+    @Query('type') type: AccountType,
+    @Query('bankId') bankId: string,
+    @Query('agencyId') agencyId: string,
+    @Req() req 
   ) {
-    return this.accountsService.openAccount(userId, body.type, body.bankId, body.agencyId);
+
+    return this.accountsService.openAccount(req.user.id, type, bankId, agencyId);
+  }
+  
+  @Post('admin-open')
+  @UseGuards(AuthGuard)
+  async openUserAccount(
+    @Query('type') type: AccountType,
+    @Query('bankId') bankId: string,
+    @Query('agencyId') agencyId: string,
+    @Query('userId') userId: string,
+    @Req() req
+  ) {
+    if (req.user.role !== 'ADMIN') {
+      throw new ForbiddenException('Only admins can access this route');
+    }
+    return this.accountsService.openAccount(userId, type, bankId, agencyId);
   }
 
   @Post('transfer')
@@ -24,18 +42,41 @@ export class AccountsController {
     return this.accountsService.transfer(body.fromAccountId, body.toAccountId, body.amount);
   }
 
-  @Post(':accountId/deposit')
+  @Post('deposit')
   @UseGuards(AuthGuard)
-  async deposit(@Param('accountId') accountId: string, @Body() body: { amount: number }) {
-    return this.accountsService.deposit(accountId, body.amount);
+  async deposit(
+    @Query('accountId') accountId: string,
+    @Query('amount') amount: number,
+    @Query('phoneNumber') phoneNumber: string,
+    @Query('method') method: "mtn" | "orange" ,
+  ) {
+    return this.accountsService.deposit(accountId, amount, phoneNumber, method);
   }
 
-  @Post(':accountId/withdraw')
+  // Check Deposit Status
+  @Get('check-deposit-status')
   @UseGuards(AuthGuard)
-  async withdraw(@Param('accountId') accountId: string, @Body() body: { amount: number }) {
-    return this.accountsService.withdraw(accountId, body.amount);
+  async getDepositStatus( @Query('transactionId') transactionId: string) {
+    return this.accountsService.checkDepositStatus(transactionId);
   }
-
+  
+  // Withdraw from account
+  @Post('withdraw')
+  @UseGuards(AuthGuard)
+  async withdraw(
+    @Query('accountId') accountId: string,
+    @Query('amount') amount: number,
+    @Query('phoneNumber') phoneNumber: string,
+    @Query('method') method: "mtn" | "orange" ,
+  ) {
+    return this.accountsService.withdraw(accountId, amount, phoneNumber, method);
+  }
+  
+  @Get('check-payout-status')
+  @UseGuards(AuthGuard)
+  async getPayoutStatus( @Query('transactionId') transactionId: string) {
+    return this.accountsService.checkPayoutStatus(transactionId);
+  }
 
   /**
    * Get accounts for current user
@@ -44,22 +85,6 @@ export class AccountsController {
   @UseGuards(AuthGuard)
   async getMyAccounts(@Req() req, @Query() dto: PaginationDto) {
     return this.accountsService.getUserAccounts(req.user.id, dto);
-  }
-
-  /**
-   * Get accounts by userId (ADMIN or account owner)
-   */
-  @Get('user/:userId')
-  @UseGuards(AuthGuard)
-  async getUserAccounts(
-    @Param('userId') userId: string,
-    @Req() req,
-    @Query() dto: PaginationDto,
-  ) {
-    if (req.user.role === RoleType.ADMIN || req.user.id === userId) {
-      return this.accountsService.getUserAccounts(userId, dto);
-    }
-    throw new Error('Forbidden');
   }
 
   

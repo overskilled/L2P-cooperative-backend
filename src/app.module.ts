@@ -16,7 +16,7 @@ import { AccountsModule } from './accounts/accounts.module';
     UsersModule,
     AuthModule,
     UsersVerificationModule,
-    AccountsModule
+    AccountsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

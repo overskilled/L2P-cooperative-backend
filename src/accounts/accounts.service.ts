@@ -13,6 +13,7 @@ import {
   RoleType,
 } from '@prisma/client';
 import { PrismaService } from 'prisma/prisma.service';
+import { v4 as uuidv4 } from "uuid"
 import { PaginatedResponse, PaginationDto } from 'src/dto/pagination.dto';
 
 @Injectable()
@@ -120,48 +121,359 @@ export class AccountsService {
   // ------------------------------
   //  Deposit funds
   // ------------------------------
-  async deposit(accountId: string, amount: number) {
+  /**
+  * Initiate a deposit request via Pawapay
+  */
+  // async deposit(accountId: string, amount: number, phoneNumber: string, method: "mtn" | "orange") {
+  //   const generateDepositId = () => uuidv4()
+
+  //   if (amount <= 0) {
+  //     throw new BadRequestException("Deposit amount must be greater than 0");
+  //   }
+
+  //   const account = await this.prisma.account.findUnique({
+  //     where: { id: accountId },
+  //   });
+
+  //   if (!account) {
+  //     throw new NotFoundException("Account not found");
+  //   }
+
+  //   // Build Pawapay request
+  //   const apiUrl = "https://api.pawapay.io/deposits";
+  //   const token = process.env.PAWAPAY_API_KEY;
+  //   if (!token) {
+  //     throw new NotFoundException("Missing Pawapay API key");
+  //   }
+
+  //   let depositId = generateDepositId();
+
+  //   const body = {
+  //     depositId, // unique id
+  //     amount: amount.toString(),
+  //     currency: "XAF",
+  //     correspondent: method === "mtn" ? "MTN_MOMO_CMR" : "ORANGE_CMR",
+  //     payer: { address: { value: `237${phoneNumber}` }, type: "MSISDN" },
+  //     customerTimestamp: new Date().toISOString(),
+  //     statementDescription: `NMD Deposit`,
+  //     country: "CMR",
+  //     preAuthorisationCode: "PMxQYqfDx", // optional if required
+  //     metadata: [
+  //       { fieldName: "accountId", fieldValue: accountId },
+  //       // { fieldName: "customerEmail", fieldValue: account.ownerEmail, isPII: true },
+  //     ],
+  //   };
+
+  //   const response = await fetch(apiUrl, {
+  //     method: "POST",
+  //     headers: {
+  //       "Authorization": `Bearer ${token}`,
+  //       "Content-Type": "application/json",
+  //       "Accept": "application/json",
+  //     },
+  //     body: JSON.stringify(body),
+  //   });
+
+  //   const data = await response.json();
+
+  //   if (!response.ok) {
+  //     console.error("Pawapay API Error:", data);
+  //     throw new BadRequestException(data?.message || "Deposit failed");
+  //   }
+
+  //   // If Pawapay succeeds, update local balance
+  //   return { depositId, message: "Transacti"}
+  // }
+
+  async deposit(accountId: string, amount: number, phoneNumber: string, method: "mtn" | "orange") {
     if (amount <= 0) {
-      throw new BadRequestException('Deposit amount must be greater than 0');
+      throw new BadRequestException("Deposit amount must be greater than 0");
     }
 
     const account = await this.prisma.account.findUnique({
       where: { id: accountId },
+      include: { user: true },
     });
+
     if (!account) {
-      throw new NotFoundException('Account not found');
+      throw new NotFoundException("Account not found");
     }
 
-    return this.prisma.account.update({
-      where: { id: accountId },
-      data: { balance: { increment: new Prisma.Decimal(amount) } },
+    // Apply 1.5% fee (user pays this)
+    const feeRate = 0.015;
+    const totalAmount = amount + amount * feeRate; // amount + fee
+
+    // Step 1: Create pending transaction
+    const transaction = await this.prisma.transaction.create({
+      data: {
+        type: "DEPOSIT",
+        status: "PENDING",
+        amount: new Prisma.Decimal(amount), 
+        fee: new Prisma.Decimal(amount * feeRate),
+        toAccountId: account.id,
+        userId: account.userId,
+        description: "Mobile Money Deposit (pending confirmation)",
+      },
     });
+
+    // Step 2: Call Pawapay
+    const apiUrl = "https://api.pawapay.io/v2/deposits";
+    const token = process.env.PAWAPAY_API_KEY;
+
+    const body = {
+      depositId: transaction.id, // link PawaPay with our transaction
+      amount: totalAmount.toFixed(0).toString(),
+      currency: "XAF",
+      payer: {
+        accountDetails: {
+          phoneNumber: `237${phoneNumber}`,
+          provider: method === "mtn" ? "MTN_MOMO_CMR" : "ORANGE_CMR"
+        },
+        type: "MMO"
+      },
+      clientReferenceId: new Date().toISOString(),
+      customerMessage: "L2P Deposit"
+    };
+
+
+    const response = await fetch(apiUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      console.log("Pawapay Error:", data);
+
+      await this.prisma.transaction.update({
+        where: { id: transaction.id },
+        data: { status: "FAILED", description: data?.message || "Deposit failed" },
+      });
+
+      throw new BadRequestException(data?.message || "Deposit failed");
+    }
+
+    // Store the pawapay-provided depositId if it differs from ours
+    await this.prisma.transaction.update({
+      where: { id: transaction.id },
+      data: { description: `Pawapay deposit ${data.depositId} - awaiting final status` },
+    });
+
+    return { transactionId: transaction.id, status: transaction.status };
   }
+
+
+
+  /**
+   * Check the final status of a deposit
+   */
+  async checkDepositStatus(transactionId: string) {
+    const transaction = await this.prisma.transaction.findUnique({
+      where: { id: transactionId },
+      include: { toAccount: true },
+    });
+
+    if (!transaction) {
+      throw new NotFoundException("Transaction not found");
+    }
+
+    if (transaction.status !== "PENDING") {
+      return transaction; // already processed
+    }
+
+    const apiUrl = `https://api.pawapay.io/v2/deposits/${transaction.id}`;
+    const token = process.env.PAWAPAY_API_KEY;
+
+    const response = await fetch(apiUrl, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+      },
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new BadRequestException(data?.message || "Failed to check status");
+    }
+
+    const depositStatus = data.data?.status; // COMPLETED | FAILED | REVERSED | PENDING
+
+    if (depositStatus === "COMPLETED") {
+      // credit account
+      await this.prisma.account.update({
+        where: { id: transaction.toAccountId! },
+        data: { balance: { increment: transaction.amount } },
+      });
+
+      return this.prisma.transaction.update({
+        where: { id: transaction.id },
+        data: { status: "SUCCESS", description: "Deposit completed" },
+      });
+    } else if (depositStatus === "FAILED" || depositStatus === "REVERSED") {
+      return this.prisma.transaction.update({
+        where: { id: transaction.id },
+        data: { status: depositStatus, description: "Deposit failed/reversed" },
+      });
+    }
+
+    return transaction; // still pending
+  }
+
+
 
   // ------------------------------
   //  Withdraw funds
   // ------------------------------
-  async withdraw(accountId: string, amount: number) {
+  async withdraw(
+    accountId: string,
+    amount: number,
+    phoneNumber: string,
+    method: "mtn" | "orange"
+  ) {
     if (amount <= 0) {
-      throw new BadRequestException('Withdrawal amount must be greater than 0');
+      throw new BadRequestException("Withdrawal amount must be greater than 0");
     }
 
     const account = await this.prisma.account.findUnique({
       where: { id: accountId },
+      include: { user: true },
     });
+
     if (!account) {
-      throw new NotFoundException('Account not found');
+      throw new NotFoundException("Account not found");
     }
 
     if (new Prisma.Decimal(account.balance).lt(amount)) {
-      throw new BadRequestException('Insufficient funds');
+      throw new BadRequestException("Insufficient funds");
     }
 
-    return this.prisma.account.update({
-      where: { id: accountId },
-      data: { balance: { decrement: new Prisma.Decimal(amount) } },
+    // Step 1: Create pending transaction
+    const transaction = await this.prisma.transaction.create({
+      data: {
+        type: "WITHDRAWAL",
+        status: "PENDING",
+        amount: new Prisma.Decimal(amount),
+        fromAccountId: account.id,
+        userId: account.userId,
+        description: "Mobile Money Withdrawal (pending confirmation)",
+      },
     });
+
+    // Step 2: Call Pawapay Payouts API
+    const apiUrl = "https://api.pawapay.io/v2/payouts";
+    const token = process.env.PAWAPAY_API_KEY;
+
+    const body = {
+      payoutId: transaction.id, // link Pawapay payout to our transaction
+      recipient: {
+        type: "MMO",
+        accountDetails: {
+          phoneNumber: `237${phoneNumber}`, // Cameroon phone numbers
+          provider: method === "mtn" ? "MTN_MOMO_CMR" : "ORANGE_CMR",
+        },
+      },
+      customerMessage: `Withdrawal for account`,
+      amount: amount.toString(),
+      currency: "XAF",
+      metadata: [
+        // { fieldName: "accountId", fieldValue: account.id },
+        { fieldName: "customerId", fieldValue: `${transaction.id}`, isPII: true },
+      ],
+    };
+
+    const response = await fetch(apiUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+
+    const data = await response.json();
+
+    console.log("Pawapay payout response: ", data)
+
+    if (data.message !== "ACCEPTED") {
+      console.log("Pawapay Payout Error:", data);
+
+      // Mark transaction as failed
+      await this.prisma.transaction.update({
+        where: { id: transaction.id },
+        data: { status: "FAILED", description: data?.message || "Withdrawal failed" },
+      });
+
+      throw new BadRequestException(data?.message || "Withdrawal failed");
+    }
+
+    return { transactionId: transaction.id, status: transaction.status };
   }
+
+
+  async checkPayoutStatus(transactionId: string) {
+    const transaction = await this.prisma.transaction.findUnique({
+      where: { id: transactionId },
+      include: { fromAccount: true }, // since payouts deduct from an account
+    });
+
+    if (!transaction) {
+      throw new NotFoundException("Transaction not found");
+    }
+
+    if (transaction.status !== "PENDING") {
+      return transaction; // already processed
+    }
+
+    const apiUrl = `https://api.pawapay.io/v2/payouts/${transaction.id}`;
+    const token = process.env.PAWAPAY_API_KEY;
+
+    const response = await fetch(apiUrl, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+      },
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new BadRequestException(data?.message || "Failed to check payout status");
+    }
+
+    const payoutStatus = data.data?.status; // COMPLETED | FAILED | REVERSED | PENDING
+
+    if (payoutStatus === "COMPLETED") {
+      // debit account if not already debited
+      await this.prisma.account.update({
+        where: { id: transaction.fromAccountId! },
+        data: { balance: { decrement: transaction.amount } },
+      });
+
+      return this.prisma.transaction.update({
+        where: { id: transaction.id },
+        data: { status: "SUCCESS", description: "Payout completed" },
+      });
+    } else if (payoutStatus === "FAILED" || payoutStatus === "REVERSED") {
+      return this.prisma.transaction.update({
+        where: { id: transaction.id },
+        data: { status: payoutStatus, description: "Payout failed/reversed" },
+      });
+    }
+
+    return transaction; // still pending
+  }
+
+
 
 
   /**

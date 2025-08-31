@@ -37,8 +37,9 @@ export class UsersVerificationController {
   @UseGuards(AuthGuard)
   reject(
     @Param('userId') userId: string,
-    @Body() body: { verifiedBy: string; notes?: string },
+    @Query('verifiedBy') verifiedBy: string,
+    @Body() body: { notes?: string },
   ) {
-    return this.verificationService.rejectVerification(userId, body.verifiedBy, body.notes);
+    return this.verificationService.rejectVerification(userId, verifiedBy, body.notes);
   }
 }

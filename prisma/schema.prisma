@@ -192,6 +192,7 @@ model Transaction {
   status TransactionStatus @default(PENDING)
 
   amount      Decimal @db.Decimal(18, 2)
+  fee         Decimal?  @db.Decimal(9, 2) @default(0.00)
   description String?
 
   fromAccountId String?
