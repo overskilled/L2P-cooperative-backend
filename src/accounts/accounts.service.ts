@@ -201,14 +201,16 @@ export class AccountsService {
 
     // Apply 1.5% fee (user pays this)
     const feeRate = 0.015;
-    const totalAmount = amount + amount * feeRate; // amount + fee
+    const amountNum = Number(amount); // or parseFloat(amount)
+    const totalAmount = amountNum + amountNum * feeRate;
+
 
     // Step 1: Create pending transaction
     const transaction = await this.prisma.transaction.create({
       data: {
         type: "DEPOSIT",
         status: "PENDING",
-        amount: new Prisma.Decimal(amount), 
+        amount: new Prisma.Decimal(amount),
         fee: new Prisma.Decimal(amount * feeRate),
         toAccountId: account.id,
         userId: account.userId,
@@ -216,13 +218,15 @@ export class AccountsService {
       },
     });
 
+
+
     // Step 2: Call Pawapay
     const apiUrl = "https://api.pawapay.io/v2/deposits";
     const token = process.env.PAWAPAY_API_KEY;
 
     const body = {
       depositId: transaction.id, // link PawaPay with our transaction
-      amount: totalAmount.toString(),
+      amount: totalAmount.toFixed(0).toString(),
       currency: "XAF",
       payer: {
         accountDetails: {
@@ -248,15 +252,17 @@ export class AccountsService {
 
     const data = await response.json();
 
-    if (!response.ok) {
-      console.log("Pawapay Error:", data);
+    console.log('Pawapay response: ', data)
+
+    if (data.status !== "ACCEPTED") {
+      console.log("Pawapay Error:", data);  
 
       await this.prisma.transaction.update({
         where: { id: transaction.id },
         data: { status: "FAILED", description: data?.message || "Deposit failed" },
       });
 
-      throw new BadRequestException(data?.message || "Deposit failed");
+      throw new BadRequestException(data?.failureReason.failureMessage || "Deposit failed");
     }
 
     // Store the pawapay-provided depositId if it differs from ours
