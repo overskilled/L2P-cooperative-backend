@@ -222,7 +222,7 @@ export class AccountsService {
 
     const body = {
       depositId: transaction.id, // link PawaPay with our transaction
-      amount: totalAmount.toFixed(0).toString(),
+      amount: totalAmount.toString(),
       currency: "XAF",
       payer: {
         accountDetails: {
