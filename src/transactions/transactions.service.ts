@@ -544,8 +544,9 @@ export class TransactionsService {
 
     // Calculate transaction fee (example: 0.5% with a minimum of 100 FCFA and maximum of 2500 FCFA)
     private calculateTransactionFee(amount: number): number {
-        const fee = amount * 0.005; // 0.5%
-        return Math.min(Math.max(fee, 100), 2500);
+        // const fee = amount * 0.005; // 0.5%
+        // return Math.min(Math.max(fee, 100), 2500);
+        return 500
     }
 
     // Get transaction statistics for dashboard
