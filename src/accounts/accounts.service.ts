@@ -409,7 +409,7 @@ export class AccountsService {
 
     console.log("Pawapay payout response: ", data)
 
-    if (data.message !== "ACCEPTED") {
+    if (data.status !== "ACCEPTED") {
       console.log("Pawapay Payout Error:", data);
 
       // Mark transaction as failed
