@@ -546,7 +546,7 @@ export class TransactionsService {
     private calculateTransactionFee(amount: number): number {
         // const fee = amount * 0.005; // 0.5%
         // return Math.min(Math.max(fee, 100), 2500);
-        return 500
+        return 0
     }
 
     // Get transaction statistics for dashboard
