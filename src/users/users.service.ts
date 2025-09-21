@@ -1,18 +1,116 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from 'prisma/prisma.service';
 import { SignupDto } from 'src/dto/signup.dto';
 import { RoleType } from 'src/types/user';
 
 import * as bcrypt from 'bcrypt';
 import { PaginatedResponse, PaginationDto } from 'src/dto/pagination.dto';
+import { MailerService } from 'src/mailer/mailer.service';
 
 @Injectable()
 export class UsersService {
-    constructor(private prisma: PrismaService) { }
+    constructor(
+        private prisma: PrismaService,
+        private mailerService: MailerService
+    ) { }
 
     // =====================
     // USER MANAGEMENT
     // =====================
+
+
+    async createUserAccount(dto: SignupDto) {
+        // Check if user already exists
+        const existingUser = await this.prisma.user.findUnique({ where: { email: dto.email } });
+        if (existingUser) throw new ConflictException('Email already exists');
+
+        const hashedPassword = await bcrypt.hash(dto.password, 10);
+
+        // Create user with temporary password
+
+        const user = await this.prisma.user.create({
+            data: {
+                email: dto.email,
+                username: dto.username,
+                password: hashedPassword,
+                profile: {
+                    create: {
+                        firstName: dto.firstName,
+                        lastName: dto.lastName,
+                        birthDate: dto.birthDate ? new Date(dto.birthDate) : null,
+                        birthPlace: dto.birthPlace,
+                        nationality: dto.nationality,
+                        resident: dto.resident,
+                        ppe: dto.ppe,
+                        idNumber: dto.idNumber,
+                        idIssuer: dto.idIssuer,
+                        idDate: dto.idDate ? new Date(dto.idDate) : null,
+                        phone: dto.phone,
+                        address: dto.address,
+                        city: dto.city,
+                        profession: dto.profession,
+                        employer: dto.employer,
+                        maritalStatus: dto.maritalStatus,
+                        children: dto.children,
+                        salary: dto.salary,
+                        signature: dto.signature,
+                        termsAccepted: dto.termsAccepted,
+                    },
+                },
+                contacts: {
+                    create: [
+                        dto.contact1Name
+                            ? {
+                                name: dto.contact1Name,
+                                phone: dto.contact1Phone,
+                                email: dto.contact1Email,
+                                relation: dto.contact1Relation,
+                            }
+                            : undefined,
+                        dto.contact2Name
+                            ? {
+                                name: dto.contact2Name,
+                                phone: dto.contact2Phone,
+                                email: dto.contact2Email,
+                                relation: dto.contact2Relation,
+                            }
+                            : undefined,
+                    ].filter(contact => contact !== undefined),
+                },
+                accounts: {
+                    create: [
+                        { type: 'EPARGNE', active: dto.accountEpargne ?? false },
+                        { type: 'COURANT', active: dto.accountCourant ?? false },
+                        { type: 'NDJANGUI', active: dto.accountNDjangui ?? false },
+                        { type: 'CHEQUE', active: dto.accountCheque ?? false },
+                        { type: 'PLACEMENT', active: dto.accountPlacement ?? false },
+                    ],
+                },
+                documents: dto.frontImage || dto.backImage ? {
+                    create: {
+                        type: dto.type ?? 'CNI',
+                        frontImage: dto.frontImage,
+                        backImage: dto.backImage,
+                    },
+                } : undefined,
+                verification: {
+                    create: { status: 'PENDING' },
+                },
+            },
+            include: { profile: true, contacts: true, accounts: true, documents: true, verification: true },
+        });
+
+        const { password, ...safeUser } = user;
+
+        // Build reset password link
+        const resetLink = `${process.env.FRONTEND_URL}/forgetPassword?email=${encodeURIComponent(user.email)}`;
+
+        // Send email via MailerService
+        await this.mailerService.sendUserCreationMail(user.email, resetLink, user.profile?.firstName!);
+
+        return { message: 'User created successfully and password reset email sent', userId: user.id };
+    }
+
 
     async getUsers(dto: PaginationDto, role?: RoleType) {
         const page = Number(dto.page) || 1;

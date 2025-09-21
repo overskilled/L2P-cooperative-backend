@@ -4,6 +4,7 @@ import { SignupDto } from 'src/dto/signup.dto';
 import { UsersService } from 'src/users/users.service';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from 'prisma/prisma.service';
+import { MailerService } from 'src/mailer/mailer.service';
 
 type AuthInput = {
     username: string
@@ -41,6 +42,7 @@ export class AuthService {
     constructor(
         private usersService: UsersService,
         private jwtService: JwtService,
+        private mailerService: MailerService,
         private prismaService: PrismaService
     ) { }
 
@@ -197,4 +199,28 @@ export class AuthService {
 
         return { accessToken, userId: user.id, username: user.username ?? user.email, user: safeUser };
     }
+
+    async sendPasswordResetLink(email: string) {
+        const user = await this.prismaService.user.findUnique({ where: { email } });
+        if (!user) throw new NotFoundException('User not found');
+
+        const resetLink = `${process.env.FRONTEND_URL}/forgetPassword?email=${encodeURIComponent(email)}`;
+        await this.mailerService.sendResetPasswordMail(email, resetLink);
+
+        return { message: 'Password reset link sent successfully' };
+    }
+
+    async resetPassword(email: string, newPassword: string) {
+        const user = await this.prismaService.user.findUnique({ where: { email } });
+        if (!user) throw new NotFoundException('User not found');
+
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+        await this.prismaService.user.update({
+            where: { email },
+            data: { password: hashedPassword },
+        });
+
+        return { message: 'Password reset successful' };
+    }
+
 }

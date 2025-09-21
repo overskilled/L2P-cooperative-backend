@@ -666,7 +666,7 @@ export class TransactionsService {
         const cancelledTransaction = await this.prisma.transaction.update({
             where: { id: transactionId },
             data: {
-                status: TransactionStatus.FAILED, // Using FAILED instead of CANCELLED
+                status: TransactionStatus.FAILED, 
                 metadata: {
                     ...(transaction.metadata as any),
                     cancelledAt: new Date().toISOString(),

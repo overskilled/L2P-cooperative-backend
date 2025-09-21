@@ -69,6 +69,19 @@ export class UsersController {
 
     return this.usersService.makeAdmin(userId);
   }
+  
+  // Create user account
+  @UseGuards(AuthGuard)
+  @Post('createAccount')
+  async createUserAccount(@Body() dto: SignupDto, @Req() req: any) {
+    // Ensure the requesting user is an ADMIN
+    if (req.user.roleType !== RoleType.ADMIN) {
+      throw new ForbiddenException('Only admins can create users accounts');
+    }
+
+    return this.usersService.createUserAccount(dto);
+  }
+
 
   // PUT /users/:id → update user details
   @Put(':id')

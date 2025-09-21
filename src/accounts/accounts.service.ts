@@ -186,7 +186,10 @@ export class AccountsService {
   // }
 
   async deposit(accountId: string, amount: number, phoneNumber: string, method: "mtn" | "orange") {
+    console.log(`[DEPOSIT START] accountId: ${accountId}, amount: ${amount}, phone: ${phoneNumber}, method: ${method}`);
+
     if (amount <= 0) {
+      console.log('[DEPOSIT ERROR] Amount must be greater than 0');
       throw new BadRequestException("Deposit amount must be greater than 0");
     }
 
@@ -196,37 +199,47 @@ export class AccountsService {
     });
 
     if (!account) {
+      console.log('[DEPOSIT ERROR] Account not found');
       throw new NotFoundException("Account not found");
     }
 
-    // Apply 1.5% fee (user pays this)
-    const feeRate = 0.015;
-    const amountNum = Number(amount); // or parseFloat(amount)
-    const totalAmount = amountNum + amountNum * feeRate;
+    console.log(`[ACCOUNT FOUND] Account: ${account.id}, Current balance: ${account.balance}, User: ${account.userId}`);
 
+    // Convert amount to Decimal for precise calculations
+    const amountDecimal = new Prisma.Decimal(amount);
+    const feeRate = new Prisma.Decimal(0.015);
+
+    // Calculate fee and total amount using Decimal operations
+    const feeAmount = amountDecimal.times(feeRate);
+    const totalAmount = amountDecimal.plus(feeAmount);
+
+    console.log(`[CALCULATIONS] Amount: ${amountDecimal}, Fee: ${feeAmount}, Total: ${totalAmount}`);
 
     // Step 1: Create pending transaction
     const transaction = await this.prisma.transaction.create({
       data: {
         type: "DEPOSIT",
         status: "PENDING",
-        amount: new Prisma.Decimal(amount),
-        fee: new Prisma.Decimal(amount * feeRate),
+        amount: amountDecimal,
+        fee: feeAmount,
         toAccountId: account.id,
         userId: account.userId,
         description: "Mobile Money Deposit (pending confirmation)",
       },
     });
 
-
+    console.log(`[TRANSACTION CREATED] ID: ${transaction.id}, Status: ${transaction.status}`);
 
     // Step 2: Call Pawapay
     const apiUrl = "https://api.pawapay.io/v2/deposits";
     const token = process.env.PAWAPAY_API_KEY;
 
+    // Convert totalAmount to integer string as required by Pawapay
+    const totalAmountInteger = totalAmount.toDecimalPlaces(0).toString();
+
     const body = {
-      depositId: transaction.id, // link PawaPay with our transaction
-      amount: totalAmount.toFixed(0).toString(),
+      depositId: transaction.id,
+      amount: totalAmountInteger,
       currency: "XAF",
       payer: {
         accountDetails: {
@@ -239,100 +252,168 @@ export class AccountsService {
       customerMessage: "L2P Deposit"
     };
 
+    console.log(`[PAWAPAY REQUEST] URL: ${apiUrl}, Body: ${JSON.stringify(body)}`);
 
-    const response = await fetch(apiUrl, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify(body),
-    });
-
-    const data = await response.json();
-
-    console.log('Pawapay response: ', data)
-
-    if (data.status !== "ACCEPTED") {
-      console.log("Pawapay Error:", data);  
-
-      await this.prisma.transaction.update({
-        where: { id: transaction.id },
-        data: { status: "FAILED", description: data?.message || "Deposit failed" },
+    try {
+      const response = await fetch(apiUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(body),
       });
 
-      throw new BadRequestException(data?.failureReason.failureMessage || "Deposit failed");
+      const data = await response.json();
+      console.log('[PAWAPAY RESPONSE]', JSON.stringify(data));
+
+      if (data.status !== "ACCEPTED") {
+        console.log("[PAWAPAY ERROR]", data);
+
+        await this.prisma.transaction.update({
+          where: { id: transaction.id },
+          data: { status: "FAILED", description: data?.message || "Deposit failed" },
+        });
+
+        console.log(`[TRANSACTION UPDATED] ID: ${transaction.id}, Status: FAILED`);
+        throw new BadRequestException(data?.failureReason?.failureMessage || "Deposit failed");
+      }
+
+      // Store the pawapay-provided depositId if it differs from ours
+      await this.prisma.transaction.update({
+        where: { id: transaction.id },
+        data: {
+          description: `Pawapay deposit ${data.depositId} - awaiting final status`,
+          metadata: { pawapayDepositId: data.depositId } // Store additional reference
+        },
+      });
+
+      console.log(`[DEPOSIT INITIATED SUCCESS] Transaction ID: ${transaction.id}, Pawapay ID: ${data.depositId}`);
+      return { transactionId: transaction.id, status: transaction.status };
+    } catch (error) {
+      console.error('[DEPOSIT PROCESSING ERROR]', error);
+      throw error;
     }
-
-    // Store the pawapay-provided depositId if it differs from ours
-    await this.prisma.transaction.update({
-      where: { id: transaction.id },
-      data: { description: `Pawapay deposit ${data.depositId} - awaiting final status` },
-    });
-
-    return { transactionId: transaction.id, status: transaction.status };
   }
 
-
-
   /**
-   * Check the final status of a deposit
+   * Check the final status of a deposit with comprehensive logging
    */
   async checkDepositStatus(transactionId: string) {
+    console.log(`[CHECK STATUS START] Transaction ID: ${transactionId}`);
+
     const transaction = await this.prisma.transaction.findUnique({
       where: { id: transactionId },
       include: { toAccount: true },
     });
 
     if (!transaction) {
+      console.log('[CHECK STATUS ERROR] Transaction not found');
       throw new NotFoundException("Transaction not found");
     }
 
+    console.log(`[TRANSACTION DETAILS] ID: ${transaction.id}, Status: ${transaction.status}, Amount: ${transaction.amount}, Account: ${transaction.toAccountId}`);
+
+    if (transaction.toAccount) {
+      console.log(`[ACCOUNT DETAILS] ID: ${transaction.toAccount.id}, Current Balance: ${transaction.toAccount.balance}`);
+    }
+
     if (transaction.status !== "PENDING") {
+      console.log(`[STATUS ALREADY PROCESSED] Current status: ${transaction.status}`);
       return transaction; // already processed
     }
 
     const apiUrl = `https://api.pawapay.io/v2/deposits/${transaction.id}`;
     const token = process.env.PAWAPAY_API_KEY;
 
-    const response = await fetch(apiUrl, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/json",
-      },
-    });
+    console.log(`[PAWAPAY STATUS CHECK] URL: ${apiUrl}`);
 
-    const data = await response.json();
+    try {
+      const response = await fetch(apiUrl, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+        },
+      });
 
-    if (!response.ok) {
-      throw new BadRequestException(data?.message || "Failed to check status");
+      const data = await response.json();
+      console.log('[PAWAPAY STATUS RESPONSE]', JSON.stringify(data));
+
+      if (!response.ok) {
+        console.log('[PAWAPAY STATUS ERROR]', data);
+        throw new BadRequestException(data?.message || "Failed to check status");
+      }
+
+      const depositStatus = data.data?.status; // COMPLETED | FAILED | REVERSED | PENDING
+      console.log(`[PAWAPAY DEPOSIT STATUS] ${depositStatus}`);
+
+      // Use a transaction to ensure atomic updates
+      if (depositStatus === "COMPLETED") {
+        console.log('[PROCESSING COMPLETED DEPOSIT] Starting transaction...');
+
+        return await this.prisma.$transaction(async (tx) => {
+          console.log(`[BALANCE BEFORE UPDATE] Account: ${transaction.toAccountId}, Balance: ${transaction.toAccount?.balance}`);
+
+          // Credit account using atomic increment
+          const updatedAccount = await tx.account.update({
+            where: { id: transaction.toAccountId! },
+            data: {
+              balance: {
+                increment: transaction.amount
+              }
+            },
+          });
+
+          console.log(`[BALANCE AFTER UPDATE] Account: ${updatedAccount.id}, New Balance: ${updatedAccount.balance}`);
+
+          // Verify the increment worked
+          const balanceIncrease = new Prisma.Decimal(updatedAccount.balance).minus(transaction.toAccount?.balance || 0);
+          console.log(`[BALANCE VERIFICATION] Expected increase: ${transaction.amount}, Actual increase: ${balanceIncrease}`);
+
+          if (!balanceIncrease.equals(transaction.amount)) {
+            console.error(`[BALANCE MISMATCH ERROR] Expected: ${transaction.amount}, Got: ${balanceIncrease}`);
+            // You might want to throw an error or handle this discrepancy
+          }
+
+          // Update transaction status
+          const updatedTransaction = await tx.transaction.update({
+            where: { id: transaction.id },
+            data: {
+              status: "SUCCESS",
+              description: "Deposit completed",
+              updatedAt: new Date()
+            },
+          });
+
+          console.log(`[TRANSACTION UPDATED] ID: ${updatedTransaction.id}, New Status: ${updatedTransaction.status}`);
+          return updatedTransaction;
+        });
+      } else if (depositStatus === "FAILED" || depositStatus === "REVERSED") {
+        console.log(`[PROCESSING ${depositStatus} DEPOSIT]`);
+
+        const status = depositStatus === "FAILED" ? "FAILED" : "REVERSED";
+        const updatedTransaction = await this.prisma.transaction.update({
+          where: { id: transaction.id },
+          data: {
+            status: status,
+            description: `Deposit ${depositStatus.toLowerCase()}`,
+            updatedAt: new Date()
+          },
+        });
+
+        console.log(`[TRANSACTION UPDATED] ID: ${updatedTransaction.id}, New Status: ${updatedTransaction.status}`);
+        return updatedTransaction;
+      }
+
+      console.log('[DEPOSIT STILL PENDING] No action taken');
+      return transaction; // still pending
+    } catch (error) {
+      console.error('[CHECK STATUS ERROR]', error);
+      throw error;
     }
-
-    const depositStatus = data.data?.status; // COMPLETED | FAILED | REVERSED | PENDING
-
-    if (depositStatus === "COMPLETED") {
-      // credit account
-      await this.prisma.account.update({
-        where: { id: transaction.toAccountId! },
-        data: { balance: { increment: transaction.amount } },
-      });
-
-      return this.prisma.transaction.update({
-        where: { id: transaction.id },
-        data: { status: "SUCCESS", description: "Deposit completed" },
-      });
-    } else if (depositStatus === "FAILED" || depositStatus === "REVERSED") {
-      return this.prisma.transaction.update({
-        where: { id: transaction.id },
-        data: { status: depositStatus, description: "Deposit failed/reversed" },
-      });
-    }
-
-    return transaction; // still pending
   }
-
 
 
   // ------------------------------
@@ -344,7 +425,10 @@ export class AccountsService {
     phoneNumber: string,
     method: "mtn" | "orange"
   ) {
+    console.log(`[WITHDRAWAL START] accountId: ${accountId}, amount: ${amount}, phone: ${phoneNumber}, method: ${method}`);
+
     if (amount <= 0) {
+      console.log('[WITHDRAWAL ERROR] Amount must be greater than 0');
       throw new BadRequestException("Withdrawal amount must be greater than 0");
     }
 
@@ -354,24 +438,35 @@ export class AccountsService {
     });
 
     if (!account) {
+      console.log('[WITHDRAWAL ERROR] Account not found');
       throw new NotFoundException("Account not found");
     }
 
-    if (new Prisma.Decimal(account.balance).lt(amount)) {
+    console.log(`[ACCOUNT FOUND] Account: ${account.id}, Current balance: ${account.balance}, User: ${account.userId}`);
+
+    const amountDecimal = new Prisma.Decimal(amount);
+    const currentBalance = new Prisma.Decimal(account.balance);
+
+    if (currentBalance.lt(amountDecimal)) {
+      console.log(`[INSUFFICIENT FUNDS] Balance: ${currentBalance}, Requested: ${amountDecimal}`);
       throw new BadRequestException("Insufficient funds");
     }
+
+    console.log(`[FUNDS VERIFIED] Balance: ${currentBalance}, Withdrawal: ${amountDecimal}, Remaining: ${currentBalance.minus(amountDecimal)}`);
 
     // Step 1: Create pending transaction
     const transaction = await this.prisma.transaction.create({
       data: {
         type: "WITHDRAWAL",
         status: "PENDING",
-        amount: new Prisma.Decimal(amount),
+        amount: amountDecimal,
         fromAccountId: account.id,
         userId: account.userId,
         description: "Mobile Money Withdrawal (pending confirmation)",
       },
     });
+
+    console.log(`[TRANSACTION CREATED] ID: ${transaction.id}, Status: ${transaction.status}, Amount: ${transaction.amount}`);
 
     // Step 2: Call Pawapay Payouts API
     const apiUrl = "https://api.pawapay.io/v2/payouts";
@@ -386,99 +481,173 @@ export class AccountsService {
           provider: method === "mtn" ? "MTN_MOMO_CMR" : "ORANGE_CMR",
         },
       },
-      customerMessage: `Withdrawal for account`,
-      amount: amount.toString(),
+      customerMessage: `Withdrawal`,
+      amount: amountDecimal.toString(),
       currency: "XAF",
       metadata: [
-        // { fieldName: "accountId", fieldValue: account.id },
         { fieldName: "customerId", fieldValue: `${transaction.id}`, isPII: true },
       ],
     };
 
-    const response = await fetch(apiUrl, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify(body),
-    });
+    console.log(`[PAWAPAY PAYOUT REQUEST] URL: ${apiUrl}, Body: ${JSON.stringify(body)}`);
 
-    const data = await response.json();
-
-    console.log("Pawapay payout response: ", data)
-
-    if (data.status !== "ACCEPTED") {
-      console.log("Pawapay Payout Error:", data);
-
-      // Mark transaction as failed
-      await this.prisma.transaction.update({
-        where: { id: transaction.id },
-        data: { status: "FAILED", description: data?.message || "Withdrawal failed" },
+    try {
+      const response = await fetch(apiUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify(body),
       });
 
-      throw new BadRequestException(data?.message || "Withdrawal failed");
-    }
+      const data = await response.json();
+      console.log("[PAWAPAY PAYOUT RESPONSE]", JSON.stringify(data));
 
-    return { transactionId: transaction.id, status: transaction.status };
+      if (data.status !== "ACCEPTED") {
+        console.log("[PAWAPAY PAYOUT ERROR]", data);
+
+        // Mark transaction as failed
+        await this.prisma.transaction.update({
+          where: { id: transaction.id },
+          data: { status: "FAILED", description: data?.message || "Withdrawal failed" },
+        });
+
+        console.log(`[TRANSACTION UPDATED] ID: ${transaction.id}, Status: FAILED`);
+        throw new BadRequestException(data?.message || "Withdrawal failed");
+      }
+
+      // Store additional payout reference if needed
+      await this.prisma.transaction.update({
+        where: { id: transaction.id },
+        data: {
+          metadata: { pawapayPayoutId: data.payoutId }
+        },
+      });
+
+      console.log(`[WITHDRAWAL INITIATED SUCCESS] Transaction ID: ${transaction.id}, Pawapay Payout ID: ${data.payoutId}`);
+      return { transactionId: transaction.id, status: transaction.status };
+    } catch (error) {
+      console.error('[WITHDRAWAL PROCESSING ERROR]', error);
+      throw error;
+    }
   }
 
-
   async checkPayoutStatus(transactionId: string) {
+    console.log(`[CHECK PAYOUT STATUS START] Transaction ID: ${transactionId}`);
+
     const transaction = await this.prisma.transaction.findUnique({
       where: { id: transactionId },
       include: { fromAccount: true }, // since payouts deduct from an account
     });
 
     if (!transaction) {
+      console.log('[CHECK PAYOUT STATUS ERROR] Transaction not found');
       throw new NotFoundException("Transaction not found");
     }
 
+    console.log(`[TRANSACTION DETAILS] ID: ${transaction.id}, Status: ${transaction.status}, Amount: ${transaction.amount}, Account: ${transaction.fromAccountId}`);
+
+    if (transaction.fromAccount) {
+      console.log(`[ACCOUNT DETAILS] ID: ${transaction.fromAccount.id}, Current Balance: ${transaction.fromAccount.balance}`);
+    }
+
     if (transaction.status !== "PENDING") {
+      console.log(`[STATUS ALREADY PROCESSED] Current status: ${transaction.status}`);
       return transaction; // already processed
     }
 
     const apiUrl = `https://api.pawapay.io/v2/payouts/${transaction.id}`;
     const token = process.env.PAWAPAY_API_KEY;
 
-    const response = await fetch(apiUrl, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/json",
-      },
-    });
+    console.log(`[PAWAPAY PAYOUT STATUS CHECK] URL: ${apiUrl}`);
 
-    const data = await response.json();
+    try {
+      const response = await fetch(apiUrl, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+        },
+      });
 
-    if (!response.ok) {
-      throw new BadRequestException(data?.message || "Failed to check payout status");
+      const data = await response.json();
+      console.log('[PAWAPAY PAYOUT STATUS RESPONSE]', JSON.stringify(data));
+
+      if (!response.ok) {
+        console.log('[PAWAPAY PAYOUT STATUS ERROR]', data);
+        throw new BadRequestException(data?.message || "Failed to check payout status");
+      }
+
+      const payoutStatus = data.data?.status; // COMPLETED | FAILED | REVERSED | PENDING
+      console.log(`[PAWAPAY PAYOUT STATUS] ${payoutStatus}`);
+
+      // Use a transaction to ensure atomic updates
+      if (payoutStatus === "COMPLETED") {
+        console.log('[PROCESSING COMPLETED PAYOUT] Starting transaction...');
+
+        return await this.prisma.$transaction(async (tx) => {
+          console.log(`[BALANCE BEFORE UPDATE] Account: ${transaction.fromAccountId}, Balance: ${transaction.fromAccount?.balance}`);
+
+          // Debit account using atomic decrement
+          const updatedAccount = await tx.account.update({
+            where: { id: transaction.fromAccountId! },
+            data: {
+              balance: {
+                decrement: transaction.amount
+              }
+            },
+          });
+
+          console.log(`[BALANCE AFTER UPDATE] Account: ${updatedAccount.id}, New Balance: ${updatedAccount.balance}`);
+
+          // Verify the decrement worked
+          const balanceDecrease = new Prisma.Decimal(transaction.fromAccount?.balance || 0).minus(updatedAccount.balance);
+          console.log(`[BALANCE VERIFICATION] Expected decrease: ${transaction.amount}, Actual decrease: ${balanceDecrease}`);
+
+          if (!balanceDecrease.equals(transaction.amount)) {
+            console.error(`[BALANCE MISMATCH ERROR] Expected: ${transaction.amount}, Got: ${balanceDecrease}`);
+            // You might want to throw an error or handle this discrepancy
+          }
+
+          // Update transaction status
+          const updatedTransaction = await tx.transaction.update({
+            where: { id: transaction.id },
+            data: {
+              status: "SUCCESS",
+              description: "Payout completed",
+              updatedAt: new Date()
+            },
+          });
+
+          console.log(`[TRANSACTION UPDATED] ID: ${updatedTransaction.id}, New Status: ${updatedTransaction.status}`);
+          return updatedTransaction;
+        });
+      } else if (payoutStatus === "FAILED" || payoutStatus === "REVERSED") {
+        console.log(`[PROCESSING ${payoutStatus} PAYOUT]`);
+
+        const status = payoutStatus === "FAILED" ? "FAILED" : "REVERSED";
+        const updatedTransaction = await this.prisma.transaction.update({
+          where: { id: transaction.id },
+          data: {
+            status: status,
+            description: `Payout ${payoutStatus.toLowerCase()}`,
+            updatedAt: new Date()
+          },
+        });
+
+        console.log(`[TRANSACTION UPDATED] ID: ${updatedTransaction.id}, New Status: ${updatedTransaction.status}`);
+        return updatedTransaction;
+      }
+
+      console.log('[PAYOUT STILL PENDING] No action taken');
+      return transaction; // still pending
+    } catch (error) {
+      console.error('[CHECK PAYOUT STATUS ERROR]', error);
+      throw error;
     }
-
-    const payoutStatus = data.data?.status; // COMPLETED | FAILED | REVERSED | PENDING
-
-    if (payoutStatus === "COMPLETED") {
-      // debit account if not already debited
-      await this.prisma.account.update({
-        where: { id: transaction.fromAccountId! },
-        data: { balance: { decrement: transaction.amount } },
-      });
-
-      return this.prisma.transaction.update({
-        where: { id: transaction.id },
-        data: { status: "SUCCESS", description: "Payout completed" },
-      });
-    } else if (payoutStatus === "FAILED" || payoutStatus === "REVERSED") {
-      return this.prisma.transaction.update({
-        where: { id: transaction.id },
-        data: { status: payoutStatus, description: "Payout failed/reversed" },
-      });
-    }
-
-    return transaction; // still pending
   }
-
 
 
 

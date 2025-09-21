@@ -7,6 +7,7 @@ import { ConfigModule } from '@nestjs/config';
 import { UsersVerificationModule } from './users-verification/users-verification.module';
 import { AccountsModule } from './accounts/accounts.module';
 import { TransactionsModule } from './transactions/transactions.module';
+import { MailerModule } from './mailer/mailer.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { TransactionsModule } from './transactions/transactions.module';
     UsersVerificationModule,
     AccountsModule,
     TransactionsModule,
+    MailerModule,
   ],
   controllers: [AppController],
   providers: [AppService],

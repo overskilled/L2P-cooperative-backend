@@ -8,6 +8,7 @@ import { LocalStrategy } from './strategies/local.strategies';
 import { JwtStrategy } from './strategies/jwt.strategies';
 import { Prisma } from '@prisma/client';
 import { PrismaModule } from 'prisma/prisma.module';
+import { MailerModule } from 'src/mailer/mailer.module';
 
 
 @Module({
@@ -21,7 +22,8 @@ import { PrismaModule } from 'prisma/prisma.module';
       },
     }),
     PassportModule,
-    PrismaModule
+    PrismaModule,
+    MailerModule
   ],
   controllers: [AuthController],
   providers: [AuthService, LocalStrategy, JwtStrategy],
