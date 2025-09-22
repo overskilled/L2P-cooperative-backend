@@ -90,7 +90,7 @@ export class MailerService {
     `;
 
         await this.resend.emails.send({
-            from: "L2P Cooperative <no-reply@l2pcoop.com>",
+            from: "L2P Cooperative <no-reply@nanosatellitemissions.com>",
             to: email,
             subject,
             html,

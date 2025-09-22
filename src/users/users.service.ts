@@ -103,7 +103,7 @@ export class UsersService {
         const { password, ...safeUser } = user;
 
         // Build reset password link
-        const resetLink = `${process.env.FRONTEND_URL}/forgetPassword?email=${encodeURIComponent(user.email)}`;
+        const resetLink = `${process.env.FRONTEND_URL}/reset-password?email=${encodeURIComponent(user.email)}`;
 
         // Send email via MailerService
         await this.mailerService.sendUserCreationMail(user.email, resetLink, user.profile?.firstName!);

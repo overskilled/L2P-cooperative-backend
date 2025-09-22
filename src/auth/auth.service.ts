@@ -204,7 +204,7 @@ export class AuthService {
         const user = await this.prismaService.user.findUnique({ where: { email } });
         if (!user) throw new NotFoundException('User not found');
 
-        const resetLink = `${process.env.FRONTEND_URL}/forgetPassword?email=${encodeURIComponent(email)}`;
+        const resetLink = `${process.env.FRONTEND_URL}/reset-password?email=${encodeURIComponent(email)}`;
         await this.mailerService.sendResetPasswordMail(email, resetLink);
 
         return { message: 'Password reset link sent successfully' };
