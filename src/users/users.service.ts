@@ -128,11 +128,19 @@ export class UsersService {
                 skip,
                 take,
                 orderBy: { createdAt: 'desc' },
+                include: {
+                    profile: true,
+                    contacts: true,
+                    accounts: true,
+                    documents: true,
+                    verification: true,
+                },
             }),
             this.prisma.user.count({
                 where: {
                     roleType: role || undefined,
                 },
+
             }),
         ]);
 
