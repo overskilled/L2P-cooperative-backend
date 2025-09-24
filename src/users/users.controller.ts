@@ -18,7 +18,7 @@ import { UsersService } from './users.service';
 import { SignupDto } from 'src/dto/signup.dto';
 import { AuthGuard } from 'src/auth/guards/auth.guard';
 import { PaginationDto } from 'src/dto/pagination.dto';
-import { ApiQuery } from '@nestjs/swagger';
+import { ApiOperation, ApiQuery, ApiResponse } from '@nestjs/swagger';
 import { RoleType } from 'src/types/user';
 import { AuthenticatedRequest } from 'src/auth/auth.service';
 
@@ -43,12 +43,23 @@ export class UsersController {
   async findOne(@Param('id') id: string) {
     return this.usersService.getUserById(id);
   }
-  
+
   @Get("profile")
   @UseGuards(AuthGuard)
   async profile(@Request() req) {
     console.log("User Object from JWT:", req.user);
     return this.usersService.getUserById(req.user.userId);
+  }
+
+  @Put(':id')
+  @ApiOperation({ summary: 'Update user information' })
+  @ApiResponse({ status: 200, description: 'User updated successfully' })
+  @ApiResponse({ status: 404, description: 'User not found' })
+  async updateUser(
+    @Param('id') id: string,
+    @Body() updateUserDto: Partial<SignupDto>
+  ) {
+    return this.usersService.updateUser(id, updateUserDto);
   }
 
 
@@ -69,7 +80,7 @@ export class UsersController {
 
     return this.usersService.makeAdmin(userId);
   }
-  
+
   // Create user account
   @UseGuards(AuthGuard)
   @Post('createAccount')
