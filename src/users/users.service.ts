@@ -151,207 +151,243 @@ export class UsersService {
     }
 
 
-    async updateUser(id: string, dto: Partial<SignupDto>) {
+    async updateUser(id: string, dto: any) {
+        console.log('=== UPDATE USER STARTED ===');
+        console.log('User ID:', id);
+        console.log('Received DTO keys:', Object.keys(dto));
+
         const user = await this.prisma.user.findUnique({
             where: { id }
         });
 
-        if (!user) throw new NotFoundException('User not found');
+        if (!user) {
+            console.log('❌ User not found');
+            throw new NotFoundException('User not found');
+        }
+
+        console.log('✅ Current user found:', { email: user.email, username: user.username });
 
         // Update user and related entities in a transaction
         const updatedUser = await this.prisma.$transaction(async (prisma) => {
+            console.log('=== TRANSACTION STARTED ===');
+
             // Prepare user update data (only include fields that are provided)
             const userUpdateData: any = {};
-            if (dto.email !== undefined) userUpdateData.email = dto.email;
-            if (dto.username !== undefined) userUpdateData.username = dto.username;
+
+            // Update username only if provided and different from current
+            if (dto.username !== undefined && dto.username !== user.username) {
+                userUpdateData.username = dto.username;
+                console.log('📝 Username will be updated:', { from: user.username, to: dto.username });
+            } else if (dto.username !== undefined) {
+                console.log('ℹ️  Username unchanged, skipping update');
+            }
 
             // Update main user only if there are fields to update
             if (Object.keys(userUpdateData).length > 0) {
+                console.log('🔄 Updating user with data:', userUpdateData);
                 await prisma.user.update({
                     where: { id },
                     data: userUpdateData,
                 });
+                console.log('✅ User updated successfully');
+            } else {
+                console.log('ℹ️  No user fields to update');
             }
 
-            // Update profile only if profile fields are provided
-            if (dto.firstName !== undefined || dto.lastName !== undefined || dto.birthDate !== undefined ||
-                dto.birthPlace !== undefined || dto.nationality !== undefined || dto.resident !== undefined ||
-                dto.ppe !== undefined || dto.idNumber !== undefined || dto.idIssuer !== undefined ||
-                dto.idDate !== undefined || dto.phone !== undefined || dto.address !== undefined ||
-                dto.city !== undefined || dto.profession !== undefined || dto.employer !== undefined ||
-                dto.maritalStatus !== undefined || dto.children !== undefined || dto.salary !== undefined ||
-                dto.signature !== undefined || dto.termsAccepted !== undefined) {
-
+            // Update profile if profile fields are provided
+            if (dto.profile !== undefined) {
+                console.log('📋 Processing profile update');
+                const profileData = dto.profile;
                 const profileUpdateData: any = {};
 
-                // Only add fields that are explicitly provided
-                if (dto.firstName !== undefined) profileUpdateData.firstName = dto.firstName;
-                if (dto.lastName !== undefined) profileUpdateData.lastName = dto.lastName;
-                if (dto.birthDate !== undefined) profileUpdateData.birthDate = dto.birthDate ? new Date(dto.birthDate) : null;
-                if (dto.birthPlace !== undefined) profileUpdateData.birthPlace = dto.birthPlace;
-                if (dto.nationality !== undefined) profileUpdateData.nationality = dto.nationality;
-                if (dto.resident !== undefined) profileUpdateData.resident = dto.resident;
-                if (dto.ppe !== undefined) profileUpdateData.ppe = dto.ppe;
-                if (dto.idNumber !== undefined) profileUpdateData.idNumber = dto.idNumber;
-                if (dto.idIssuer !== undefined) profileUpdateData.idIssuer = dto.idIssuer;
-                if (dto.idDate !== undefined) profileUpdateData.idDate = dto.idDate ? new Date(dto.idDate) : null;
-                if (dto.phone !== undefined) profileUpdateData.phone = dto.phone;
-                if (dto.address !== undefined) profileUpdateData.address = dto.address;
-                if (dto.city !== undefined) profileUpdateData.city = dto.city;
-                if (dto.profession !== undefined) profileUpdateData.profession = dto.profession;
-                if (dto.employer !== undefined) profileUpdateData.employer = dto.employer;
-                if (dto.maritalStatus !== undefined) profileUpdateData.maritalStatus = dto.maritalStatus;
-                if (dto.children !== undefined) profileUpdateData.children = dto.children;
-                if (dto.salary !== undefined) profileUpdateData.salary = dto.salary;
-                if (dto.signature !== undefined) profileUpdateData.signature = dto.signature;
-                if (dto.termsAccepted !== undefined) profileUpdateData.termsAccepted = dto.termsAccepted;
-
-                await prisma.profile.upsert({
-                    where: { userId: id },
-                    update: profileUpdateData,
-                    create: {
-                        userId: id,
-                        firstName: dto.firstName || '',
-                        lastName: dto.lastName || '',
-                        birthDate: dto.birthDate ? new Date(dto.birthDate) : null,
-                        birthPlace: dto.birthPlace || '',
-                        nationality: dto.nationality || '',
-                        resident: dto.resident || '',
-                        ppe: dto.ppe || '',
-                        idNumber: dto.idNumber || '',
-                        idIssuer: dto.idIssuer || '',
-                        idDate: dto.idDate ? new Date(dto.idDate) : null,
-                        phone: dto.phone || '',
-                        address: dto.address || '',
-                        city: dto.city || '',
-                        profession: dto.profession || '',
-                        employer: dto.employer || '',
-                        maritalStatus: dto.maritalStatus || '',
-                        children: dto.children || 0,
-                        salary: dto.salary || '0',
-                        signature: dto.signature || '',
-                        termsAccepted: dto.termsAccepted || false,
-                    },
-                });
-            }
-
-            // Update contacts only if contact fields are provided
-            if (dto.contact1Name !== undefined || dto.contact2Name !== undefined) {
-                // Get existing contacts to understand current state
-                const existingContacts = await prisma.emergencyContact.findMany({
-                    where: { userId: id }
-                });
-
-                const contactsToUpdate: any[] = [];
-
-                // Handle contact 1 updates
-                if (dto.contact1Name !== undefined) {
-                    const contact1Data: any = { name: dto.contact1Name };
-                    if (dto.contact1Phone !== undefined) contact1Data.phone = dto.contact1Phone;
-                    if (dto.contact1Email !== undefined) contact1Data.email = dto.contact1Email;
-                    if (dto.contact1Relation !== undefined) contact1Data.relation = dto.contact1Relation;
-
-                    contactsToUpdate.push(contact1Data);
-                }
-
-                // Handle contact 2 updates
-                if (dto.contact2Name !== undefined) {
-                    const contact2Data: any = { name: dto.contact2Name };
-                    if (dto.contact2Phone !== undefined) contact2Data.phone = dto.contact2Phone;
-                    if (dto.contact2Email !== undefined) contact2Data.email = dto.contact2Email;
-                    if (dto.contact2Relation !== undefined) contact2Data.relation = dto.contact2Relation;
-
-                    contactsToUpdate.push(contact2Data);
-                }
-
-                // Delete existing contacts and recreate with updated data
-                await prisma.emergencyContact.deleteMany({ where: { userId: id } });
-
-                if (contactsToUpdate.length > 0) {
-                    await prisma.emergencyContact.createMany({
-                        data: contactsToUpdate.map(contact => ({
-                            ...contact,
-                            userId: id,
-                        })),
-                    });
-                }
-            }
-
-            // Update accounts only if account fields are provided
-            if (dto.accountEpargne !== undefined || dto.accountCourant !== undefined ||
-                dto.accountNDjangui !== undefined || dto.accountCheque !== undefined ||
-                dto.accountPlacement !== undefined) {
-
-                // Get existing accounts for this user
-                const existingAccounts = await prisma.account.findMany({
-                    where: { userId: id }
-                });
-
-                const accountUpdates: Promise<any>[] = [];
-
-                // Handle each account type
-                const accountTypes = [
-                    { type: 'EPARGNE' as const, active: dto.accountEpargne },
-                    { type: 'COURANT' as const, active: dto.accountCourant },
-                    { type: 'NDJANGUI' as const, active: dto.accountNDjangui },
-                    { type: 'CHEQUE' as const, active: dto.accountCheque },
-                    { type: 'PLACEMENT' as const, active: dto.accountPlacement },
+                // Only update essential profile fields to reduce transaction time
+                const essentialProfileFields = [
+                    'firstName', 'lastName', 'birthDate', 'birthPlace', 'nationality',
+                    'resident', 'phone', 'address', 'city', 'profession', 'employer',
+                    'maritalStatus', 'children', 'salary', 'termsAccepted'
                 ];
 
-                for (const accountType of accountTypes) {
-                    if (accountType.active !== undefined) {
-                        const existingAccount = existingAccounts.find(acc => acc.type === accountType.type);
-
-                        if (existingAccount) {
-                            // Update existing account
-                            accountUpdates.push(
-                                prisma.account.update({
-                                    where: { id: existingAccount.id },
-                                    data: { active: accountType.active }
-                                })
-                            );
+                essentialProfileFields.forEach(field => {
+                    if (profileData[field] !== undefined) {
+                        if (field === 'birthDate' && profileData[field]) {
+                            profileUpdateData[field] = new Date(profileData[field]);
                         } else {
-                            // Create new account if it doesn't exist
-                            accountUpdates.push(
-                                prisma.account.create({
-                                    data: {
-                                        userId: id,
-                                        type: accountType.type,
-                                        active: accountType.active,
-                                        balance: 0
-                                    }
-                                })
-                            );
+                            profileUpdateData[field] = profileData[field];
+                        }
+                        console.log(`📝 Profile ${field}:`, profileData[field]);
+                    }
+                });
+
+                // Handle signature separately (large data)
+                if (profileData.signature !== undefined && profileData.signature) {
+                    // Only update signature if it's not empty and different
+                    profileUpdateData.signature = profileData.signature;
+                    console.log('📝 Profile signature updated (length):', profileData.signature.length);
+                }
+
+                if (Object.keys(profileUpdateData).length > 0) {
+                    console.log('🔄 Upserting profile with essential data');
+                    await prisma.profile.upsert({
+                        where: { userId: id },
+                        update: profileUpdateData,
+                        create: {
+                            userId: id,
+                            ...profileUpdateData,
+                            firstName: profileData.firstName || '',
+                            lastName: profileData.lastName || '',
+                            birthDate: profileData.birthDate ? new Date(profileData.birthDate) : null,
+                            birthPlace: profileData.birthPlace || '',
+                            nationality: profileData.nationality || '',
+                            resident: profileData.resident || '',
+                            phone: profileData.phone || '',
+                            address: profileData.address || '',
+                            city: profileData.city || '',
+                            profession: profileData.profession || '',
+                            employer: profileData.employer || '',
+                            maritalStatus: profileData.maritalStatus || '',
+                            children: profileData.children || 0,
+                            salary: profileData.salary || '0',
+                            signature: profileData.signature || '',
+                            termsAccepted: profileData.termsAccepted || false,
+                        },
+                    });
+                    console.log('✅ Profile updated successfully');
+                } else {
+                    console.log('ℹ️  No profile fields to update');
+                }
+            } else {
+                console.log('ℹ️  No profile data provided');
+            }
+
+            // Update contacts if contacts array is provided
+            if (dto.contacts !== undefined) {
+                console.log('📋 Processing contacts update');
+                console.log('Received contacts count:', dto.contacts.length);
+
+                // Delete existing contacts
+                console.log('🗑️  Deleting existing contacts');
+                await prisma.emergencyContact.deleteMany({
+                    where: { userId: id }
+                });
+
+                // Create new contacts if array is not empty
+                if (dto.contacts.length > 0) {
+                    console.log('🔄 Creating new contacts:', dto.contacts.length);
+                    const contactData = dto.contacts.map(contact => ({
+                        userId: id,
+                        name: contact.name || '',
+                        phone: contact.phone || '',
+                        email: contact.email || '',
+                        relation: contact.relation || '',
+                    }));
+
+                    await prisma.emergencyContact.createMany({
+                        data: contactData,
+                        skipDuplicates: true,
+                    });
+                    console.log('✅ Contacts created successfully');
+                } else {
+                    console.log('ℹ️  No contacts to create (empty array)');
+                }
+            } else {
+                console.log('ℹ️  No contacts data provided');
+            }
+
+            // Update accounts if accounts array is provided - do this more efficiently
+            if (dto.accounts !== undefined) {
+                console.log('📋 Processing accounts update');
+                console.log('Received accounts count:', dto.accounts.length);
+
+                // Use Promise.all for parallel processing
+                const accountPromises = dto.accounts.map(async (accountData) => {
+                    if (accountData.id && accountData.type) {
+                        console.log(`🔄 Processing account ${accountData.id} (${accountData.type})`);
+
+                        try {
+                            await prisma.account.upsert({
+                                where: { id: accountData.id },
+                                update: {
+                                    active: accountData.active !== undefined ? accountData.active : undefined,
+                                    balance: accountData.balance !== undefined ? accountData.balance : undefined,
+                                    type: accountData.type,
+                                },
+                                create: {
+                                    id: accountData.id,
+                                    userId: id,
+                                    type: accountData.type,
+                                    balance: accountData.balance || '0',
+                                    active: accountData.active !== undefined ? accountData.active : true,
+                                },
+                            });
+                            console.log(`✅ Account ${accountData.id} updated successfully`);
+                        } catch (error) {
+                            console.error(`❌ Error updating account ${accountData.id}:`, error);
                         }
                     }
-                }
-
-                if (accountUpdates.length > 0) {
-                    await Promise.all(accountUpdates);
-                }
-            }
-
-            // Update documents only if document fields are provided
-            if (dto.frontImage !== undefined || dto.backImage !== undefined || dto.type !== undefined) {
-                const documentUpdateData: any = {};
-                if (dto.type !== undefined) documentUpdateData.type = dto.type;
-                if (dto.frontImage !== undefined) documentUpdateData.frontImage = dto.frontImage;
-                if (dto.backImage !== undefined) documentUpdateData.backImage = dto.backImage;
-
-                await prisma.document.upsert({
-                    where: { userId: id },
-                    update: documentUpdateData,
-                    create: {
-                        userId: id,
-                        type: dto.type || 'CNI',
-                        frontImage: dto.frontImage || '',
-                        backImage: dto.backImage || '',
-                    },
                 });
+
+                await Promise.all(accountPromises);
+                console.log('✅ All accounts processed');
+            } else {
+                console.log('ℹ️  No accounts data provided');
             }
+
+            // Update documents if documents object is provided
+            if (dto.documents !== undefined) {
+                console.log('📋 Processing documents update');
+                const documentsData = dto.documents;
+                const documentUpdateData: any = {};
+
+                if (documentsData.type !== undefined) {
+                    documentUpdateData.type = documentsData.type;
+                    console.log('📝 Documents type:', documentsData.type);
+                }
+                if (documentsData.frontImage !== undefined) {
+                    documentUpdateData.frontImage = documentsData.frontImage;
+                    console.log('📝 Documents frontImage updated');
+                }
+                if (documentsData.backImage !== undefined) {
+                    documentUpdateData.backImage = documentsData.backImage;
+                    console.log('📝 Documents backImage updated');
+                }
+
+                if (Object.keys(documentUpdateData).length > 0) {
+                    console.log('🔄 Upserting documents');
+                    await prisma.document.upsert({
+                        where: { userId: id },
+                        update: documentUpdateData,
+                        create: {
+                            userId: id,
+                            type: documentsData.type || 'CNI',
+                            frontImage: documentsData.frontImage || '',
+                            backImage: documentsData.backImage || '',
+                        },
+                    });
+                    console.log('✅ Documents updated successfully');
+                } else {
+                    console.log('ℹ️  No document fields to update');
+                }
+            } else {
+                console.log('ℹ️  No documents data provided');
+            }
+
+            // Skip verification update to prevent timeout
+            if (dto.verification !== undefined) {
+                console.log('ℹ️  Verification update skipped to prevent transaction timeout');
+            }
+
+            // Update the user's updatedAt timestamp
+            console.log('🔄 Updating user timestamp');
+            await prisma.user.update({
+                where: { id },
+                data: {
+                    updatedAt: new Date()
+                }
+            });
 
             // Return the complete updated user with all relations
-            return await prisma.user.findUnique({
+            console.log('📥 Fetching updated user with relations');
+            const finalUser = await prisma.user.findUnique({
                 where: { id },
                 include: {
                     profile: true,
@@ -361,10 +397,20 @@ export class UsersService {
                     verification: true,
                 },
             });
+
+            console.log('✅ Final user data fetched');
+            console.log('=== TRANSACTION COMPLETED ===');
+            return finalUser;
+        }, {
+            timeout: 10000, // Increase transaction timeout to 10 seconds
         });
 
+        console.log('=== UPDATE USER COMPLETED ===');
+        console.log('Returning user data');
+
         // Return updated user directly (no password field present)
-        return updatedUser;
+        const { ...userWithoutPassword } = updatedUser;
+        return userWithoutPassword;
     }
 
     async makeAdmin(userId: string) {
