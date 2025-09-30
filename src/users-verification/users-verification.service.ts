@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from 'prisma/prisma.service';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 import { PaginatedResponse, PaginationDto } from 'src/dto/pagination.dto';
+import { MailerService } from 'src/mailer/mailer.service';
 
 interface VerificationStatus {
     PENDING: 'PENDING';
@@ -12,7 +13,10 @@ interface VerificationStatus {
 
 @Injectable()
 export class UsersVerificationService {
-    constructor(private prisma: PrismaService) { }
+    constructor(
+        private prisma: PrismaService,
+        private mailerService: MailerService
+    ) { }
 
     // Get all user verifications
     async getUsersVerification(dto: PaginationDto): Promise<any> {
@@ -87,18 +91,21 @@ export class UsersVerificationService {
 
         try {
             // 1. Check if verification exists
-            const verification = await this.prisma.verification.findUnique({
-                where: { userId },
+            const user = await this.prisma.user.findUnique({
+                where: { id: userId },
+                include: { profile: true, verification: true },
             });
 
-            if (!verification) {
+            if (!user) {
                 throw new NotFoundException(`Verification for userId ${userId} not found`);
             }
 
             // 2. Prevent double approval
-            if (verification.status === 'APPROVED') {
+            if (user?.verification?.status! === 'APPROVED') {
                 throw new BadRequestException(`User ${userId} is already approved`);
             }
+
+            await this.mailerService.sendAccountApprovalEmail(user.email, user.profile?.firstName!);
 
             // 3. Update verification status
             return await this.prisma.verification.update({
@@ -109,6 +116,8 @@ export class UsersVerificationService {
                     verifiedAt: new Date(),
                 },
             });
+
+
         } catch (error) {
             if (
                 error instanceof PrismaClientKnownRequestError &&

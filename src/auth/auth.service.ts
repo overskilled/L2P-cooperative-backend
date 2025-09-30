@@ -106,7 +106,6 @@ export class AuthService {
         }
     }
 
-
     async signup(dto: SignupDto) {
         const existingUser = await this.prismaService.user.findUnique({ where: { email: dto.email } });
         if (existingUser) throw new ConflictException('Email already exists');
@@ -197,6 +196,8 @@ export class AuthService {
             username: user.username ?? user.email,
         });
 
+        await this.mailerService.sendWelcomeEmail(user.email, user.profile?.firstName!);
+
         return { accessToken, userId: user.id, username: user.username ?? user.email, user: safeUser };
     }
 
@@ -223,4 +224,67 @@ export class AuthService {
         return { message: 'Password reset successful' };
     }
 
+    async deleteUser(userId: string): Promise<{ message: string }> {
+        const user = await this.prismaService.user.findUnique({
+            where: { id: userId },
+            include: {
+                profile: true,
+                contacts: true,
+                accounts: true,
+                documents: true,
+                verification: true,
+            },
+        });
+
+        if (!user) {
+            throw new NotFoundException('User not found');
+        }
+
+        // Use transaction to ensure all deletions succeed or none do
+        return await this.prismaService.$transaction(async (prisma) => {
+            // Delete related records in the correct order (respecting foreign key constraints)
+            
+            // Delete verification record
+            if (user.verification) {
+                await prisma.verification.deleteMany({
+                    where: { userId: userId }
+                });
+            }
+
+            // Delete contacts
+            if (user.contacts && user.contacts.length > 0) {
+                await prisma.emergencyContact.deleteMany({
+                    where: { userId: userId }
+                });
+            }
+
+            // Delete accounts
+            if (user.accounts && user.accounts.length > 0) {
+                await prisma.account.deleteMany({
+                    where: { userId: userId }
+                });
+            }
+
+            // Delete documents
+            if (user.documents) {
+                await prisma.document.deleteMany({
+                    where: { userId: userId }
+                });
+            }
+
+            // Delete profile
+            if (user.profile) {
+                await prisma.profile.deleteMany({
+                    where: { userId: userId }
+                });
+            }
+
+            // Finally delete the user
+            await prisma.user.delete({
+                where: { id: userId }
+            });
+
+            return { message: 'User and all related data deleted successfully' };
+        });
+    }
 }

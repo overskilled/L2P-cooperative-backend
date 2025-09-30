@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -32,7 +33,7 @@ import { UserProfileResponse } from 'src/dto/user-profile.dto';
 @ApiTags('Authentication')
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(private readonly authService: AuthService) { }
 
   // ------------------- LOGIN -------------------
   @ApiOperation({
@@ -131,5 +132,12 @@ export class AuthController {
     @Body('newPassword') newPassword: string,
   ) {
     return this.authService.resetPassword(email, newPassword);
+  }
+
+  @Delete('user/:id')
+  @UseGuards(AuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async deleteUser(@Param('id') userId: string) {
+    return await this.authService.deleteUser(userId);
   }
 }
