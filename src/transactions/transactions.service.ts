@@ -2,7 +2,7 @@ import { Injectable, BadRequestException, ForbiddenException, NotFoundException 
 import { PrismaService } from 'prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CreateTransactionDto, ConfirmTransactionDto } from './dto/transaction.dto';
-import { TransactionType, TransactionStatus, RoleType } from '@prisma/client';
+import { TransactionType, TransactionStatus, RoleType, Prisma } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import { PaginatedResponse, PaginationDto } from 'src/dto/pagination.dto';
 
@@ -259,6 +259,174 @@ export class TransactionsService {
 
         return new PaginatedResponse(transactions, total, dto);
     }
+
+
+    async getTransactionsByUserAndStatus(userId: string, status: string, dto: PaginationDto) {
+
+        console.log("Status received:", status);
+        // Validate status parameter
+        const validStatuses = ['PENDING',, "SUCCESS", 'COMPLETED', 'FAILED', 'CANCELLED', 'PROCESSING'];
+        if (!validStatuses.includes(status)) {
+            throw new BadRequestException(`Invalid status. Must be one of: ${validStatuses.join(', ')}`);
+        }
+
+        const page = Number(dto.page) || 1;
+        const limit = Number(dto.limit) || 10;
+        const skip = (page - 1) * limit;
+        const take = limit;
+
+        const whereClause = {
+            AND: [
+                {
+                    OR: [
+                        { fromAccount: { userId: userId } },
+                        { toAccount: { userId: userId } }
+                    ]
+                },
+                { status: status as TransactionStatus }
+            ]
+        };
+
+        const [transactions, total] = await Promise.all([
+            this.prisma.transaction.findMany({
+                where: whereClause,
+                skip,
+                take,
+                include: {
+                    fromAccount: {
+                        select: {
+                            id: true,
+                            rib: true,
+                            user: { select: { id: true, email: true } }
+                        }
+                    },
+                    toAccount: {
+                        select: {
+                            id: true,
+                            rib: true,
+                            user: { select: { id: true, email: true } }
+                        }
+                    }
+                },
+                orderBy: { createdAt: 'desc' }
+            }),
+            this.prisma.transaction.count({ where: whereClause })
+        ]);
+
+        return new PaginatedResponse(transactions, total, dto);
+    }
+
+
+    async searchTransactions(userId: string, searchParams: {
+        page?: number;
+        size?: number;
+        column?: string;
+        value?: string;
+        operator?: string;
+    }) {
+        const page = Number(searchParams.page) || 0;
+        const size = Number(searchParams.size) || 10;
+        const skip = page * size;
+        const take = size;
+
+        // Build the where clause dynamically based on search parameters
+        const whereClause: any = {
+            OR: [
+                {
+                    fromAccount: {
+                        userId: userId
+                    }
+                },
+                {
+                    toAccount: {
+                        userId: userId
+                    }
+                }
+            ]
+        };
+
+        // Add search filters if provided
+        if (searchParams.column && searchParams.value) {
+            const searchCondition = this.buildSearchCondition(
+                searchParams.column,
+                searchParams.value,
+                searchParams.operator
+            );
+
+            whereClause.AND = [searchCondition];
+        }
+
+        const [transactions, total] = await Promise.all([
+            this.prisma.transaction.findMany({
+                where: whereClause,
+                skip,
+                take,
+                include: {
+                    fromAccount: {
+                        select: {
+                            id: true,
+                            rib: true,
+                            user: {
+                                select: {
+                                    id: true,
+                                    email: true,
+                                }
+                            }
+                        }
+                    },
+                    toAccount: {
+                        select: {
+                            id: true,
+                            rib: true,
+                            user: {
+                                select: {
+                                    id: true,
+                                    email: true,
+                                }
+                            }
+                        }
+                    }
+                },
+                orderBy: {
+                    createdAt: 'desc'
+                }
+            }),
+            this.prisma.transaction.count({
+                where: whereClause
+            })
+        ]);
+
+        return {
+            data: transactions,
+            pagination: {
+                page: page,
+                size: size,
+                total: total,
+                totalPages: Math.ceil(total / size)
+            }
+        };
+    }
+
+
+    async countTransactionsByUser(userId: string): Promise<number> {
+        return this.prisma.transaction.count({
+            where: {
+                OR: [
+                    {
+                        fromAccount: {
+                            userId: userId,
+                        },
+                    },
+                    {
+                        toAccount: {
+                            userId: userId,
+                        },
+                    },
+                ],
+            },
+        });
+    }
+
 
     // Emit transaction from one account to another based on RIB
     async createTransaction(createTransactionDto: CreateTransactionDto, userId: string) {
@@ -666,7 +834,7 @@ export class TransactionsService {
         const cancelledTransaction = await this.prisma.transaction.update({
             where: { id: transactionId },
             data: {
-                status: TransactionStatus.FAILED, 
+                status: TransactionStatus.FAILED,
                 metadata: {
                     ...(transaction.metadata as any),
                     cancelledAt: new Date().toISOString(),
@@ -801,5 +969,40 @@ export class TransactionsService {
         ]);
 
         return new PaginatedResponse(transactions, total, paginationDto);
+    }
+
+    private buildSearchCondition(column: string, value: string, operator: string = "contains") {
+        switch (operator) {
+            case "equals":
+                return { [column]: value };
+            case "contains":
+                return {
+                    [column]: {
+                        contains: value,
+                        mode: 'insensitive' as Prisma.QueryMode
+                    }
+                };
+            case "startsWith":
+                return {
+                    [column]: {
+                        startsWith: value,
+                        mode: 'insensitive' as Prisma.QueryMode
+                    }
+                };
+            case "endsWith":
+                return {
+                    [column]: {
+                        endsWith: value,
+                        mode: 'insensitive' as Prisma.QueryMode
+                    }
+                };
+            default:
+                return {
+                    [column]: {
+                        contains: value,
+                        mode: 'insensitive' as Prisma.QueryMode
+                    }
+                };
+        }
     }
 }

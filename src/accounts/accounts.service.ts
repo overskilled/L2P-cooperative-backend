@@ -706,6 +706,42 @@ export class AccountsService {
     return new PaginatedResponse(data, total, dto);
   }
 
+  async getUserTotalBalance(userId: string) {
+    const result = await this.prisma.account.aggregate({
+      where: {
+        userId: userId,
+      },
+      _sum: {
+        balance: true,
+      },
+    });
+
+    return {
+      totalBalance: result._sum.balance || 0,
+      userId: userId,
+    };
+  }
+
+  async getAvailableFunds(userId: string) {
+    const result = await this.prisma.account.aggregate({
+      where: {
+        userId: userId,
+        type: {
+          in: ['COURANT', 'CHEQUE', 'PLACEMENT']
+        }
+      },
+      _sum: {
+        balance: true,
+      },
+    });
+
+    return {
+      availableFunds: result._sum.balance || 0,
+      userId: userId,
+      accountTypes: ['COURANT', 'CHEQUE', 'PLACEMENT'],
+    };
+  }
+
   /**
    * Get all active accounts (ADMIN only)
    */

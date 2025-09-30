@@ -9,6 +9,19 @@ import { AuthGuard } from 'src/auth/guards/auth.guard';
 export class AccountsController {
   constructor(private accountsService: AccountsService) { }
 
+
+  @Get('my-balance')
+  @UseGuards(AuthGuard)
+  async getMyTransactions(@Req() req) {
+    return this.accountsService.getUserTotalBalance(req.user.id);
+  }
+
+  @Get('available-funds')
+  @UseGuards(AuthGuard)
+  async getAvailableFunds(@Req() req) {
+    return this.accountsService.getAvailableFunds(req.user.id);
+  }
+
   @Post('open')
   @UseGuards(AuthGuard)
   async createAccount(

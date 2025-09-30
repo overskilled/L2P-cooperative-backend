@@ -9,7 +9,9 @@ import {
   Query,
   UseGuards,
   Req,
-  ForbiddenException
+  ForbiddenException,
+  DefaultValuePipe,
+  ParseIntPipe
 } from '@nestjs/common';
 import { TransactionsService } from './transactions.service';
 import { CreateTransactionDto, ConfirmTransactionDto } from './dto/transaction.dto';
@@ -33,6 +35,26 @@ export class TransactionsController {
     return this.transactionsService.getAllTransactions(dto);
   }
 
+  @Get('search')
+  async searchTransactions(
+    @Req() req,
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('size', new DefaultValuePipe(10), ParseIntPipe) size: number,
+    @Query('column') column?: string,
+    @Query('value') value?: string,
+    @Query('operator') operator?: string
+  ) {
+    const searchParams = {
+      page,
+      size,
+      column,
+      value,
+      operator
+    };
+
+    return this.transactionsService.searchTransactions(req.user.id, searchParams);
+  }
+
 
   /**
    * Get transactions for current user
@@ -40,6 +62,16 @@ export class TransactionsController {
   @Get('my-transactions')
   async getMyTransactions(@Req() req, @Query() dto: PaginationDto) {
     return this.transactionsService.getTransactionsByUser(req.user.id, dto);
+  }
+
+  @Get('transactions-by-status')
+  async getMyTransactionsByUserAndStatus(@Req() req, @Query("status") status: string, @Query() dto: PaginationDto) {
+    return this.transactionsService.getTransactionsByUserAndStatus(req.user.id, status, dto);
+  }
+
+  @Get('my-transactions-count')
+  async getMyTransactionsCount(@Req() req) {
+    return this.transactionsService.countTransactionsByUser(req.user.id);
   }
 
 
@@ -56,7 +88,7 @@ export class TransactionsController {
   ) {
     return this.transactionsService.getTransactionsByAccount(accountId, dto, req.user);
   }
-  
+
 
   /**
    * Get transaction by ID
