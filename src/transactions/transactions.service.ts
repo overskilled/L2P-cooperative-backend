@@ -265,7 +265,7 @@ export class TransactionsService {
 
         console.log("Status received:", status);
         // Validate status parameter
-        const validStatuses = ['PENDING',, "SUCCESS", 'COMPLETED', 'FAILED', 'CANCELLED', 'PROCESSING'];
+        const validStatuses = ['PENDING', , "SUCCESS", 'COMPLETED', 'FAILED', 'CANCELLED', 'PROCESSING'];
         if (!validStatuses.includes(status)) {
             throw new BadRequestException(`Invalid status. Must be one of: ${validStatuses.join(', ')}`);
         }
@@ -432,46 +432,23 @@ export class TransactionsService {
     async createTransaction(createTransactionDto: CreateTransactionDto, userId: string) {
         const { fromAccountRib, toAccountRib, amount, description } = createTransactionDto;
 
-        // Validate amount
-        if (amount <= 0) {
-            throw new BadRequestException('Amount must be greater than zero');
-        }
+        if (amount <= 0) throw new BadRequestException('Amount must be greater than zero');
 
-        // Find accounts
         const fromAccount = await this.prisma.account.findUnique({
             where: { rib: fromAccountRib },
-            include: { user: true }
+            include: { user: true },
         });
-
-        if (!fromAccount) {
-            throw new NotFoundException('Source account not found');
-        }
-
-        // Check if user owns the source account
-        if (fromAccount.userId !== userId) {
-            throw new ForbiddenException('You can only transfer from your own accounts');
-        }
+        if (!fromAccount) throw new NotFoundException('Source account not found');
+        if (fromAccount.userId !== userId) throw new ForbiddenException('You can only transfer from your own accounts');
 
         const toAccount = await this.prisma.account.findUnique({
             where: { rib: toAccountRib },
-            include: { user: true }
+            include: { user: true },
         });
+        if (!toAccount) throw new NotFoundException('Destination account not found');
+        if (fromAccount.id === toAccount.id) throw new BadRequestException('Cannot transfer to the same account');
+        if (new Decimal(fromAccount.balance).lessThan(amount)) throw new BadRequestException('Insufficient funds');
 
-        if (!toAccount) {
-            throw new NotFoundException('Destination account not found');
-        }
-
-        // Check if accounts are different
-        if (fromAccount.id === toAccount.id) {
-            throw new BadRequestException('Cannot transfer to the same account');
-        }
-
-        // Check sufficient balance
-        if (new Decimal(fromAccount.balance).lessThan(amount)) {
-            throw new BadRequestException('Insufficient funds');
-        }
-
-        // Check daily transfer limit (assuming 2,000,000 FCFA daily limit)
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         const tomorrow = new Date(today);
@@ -481,127 +458,104 @@ export class TransactionsService {
             where: {
                 fromAccountId: fromAccount.id,
                 status: TransactionStatus.COMPLETED,
-                createdAt: {
-                    gte: today,
-                    lt: tomorrow
-                }
+                createdAt: { gte: today, lt: tomorrow },
             },
-            _sum: {
-                amount: true
-            }
+            _sum: { amount: true },
         });
 
-        const dailyTotal = todayTransactions._sum.amount || 0;
-        const dailyTotalNum = new Decimal(dailyTotal).toNumber();
-        if (dailyTotalNum + amount > 2000000) {
-            throw new BadRequestException('Daily transfer limit exceeded');
-        }
+        const dailyTotalNum = new Decimal(todayTransactions._sum.amount || 0).toNumber();
+        if (dailyTotalNum + amount > 2_000_000) throw new BadRequestException('Daily transfer limit exceeded');
 
-        // Calculate transaction fee
         const fee = this.calculateTransactionFee(amount);
-        const totalAmount = new Decimal(amount).plus(fee).toNumber();
-
-        // Determine transaction status based on amount
-        const isHighValue = amount > 500000;
+        const isHighValue = amount > 500_000;
         const status = isHighValue ? TransactionStatus.PENDING_APPROVAL : TransactionStatus.PENDING;
 
-        // Create transaction record
-        const transaction = await this.prisma.transaction.create({
-            data: {
-                amount,
-                description,
-                type: TransactionType.TRANSFER,
-                status,
-                fromAccountId: fromAccount.id,
-                toAccountId: toAccount.id,
-                fee,
-                metadata: {
-                    requiresApproval: isHighValue
-                }
-            },
-            include: {
-                fromAccount: {
-                    include: { user: true }
+        // Create transaction and process atomically
+        const transaction = await this.prisma.$transaction(async (tx) => {
+            const txRecord = await tx.transaction.create({
+                data: {
+                    amount,
+                    description,
+                    type: TransactionType.TRANSFER,
+                    status,
+                    fromAccountId: fromAccount.id,
+                    toAccountId: toAccount.id,
+                    fee,
+                    metadata: { requiresApproval: isHighValue },
                 },
-                toAccount: {
-                    include: { user: true }
-                }
-            }
-        });
+                include: {
+                    fromAccount: { include: { user: true } },
+                    toAccount: { include: { user: true } },
+                },
+            });
 
-        // Process immediately if low value transaction
-        if (!isHighValue) {
-            await this.processTransaction(transaction.id);
-        } else {
-            // Emit event for high-value transaction requiring approval
-            this.eventEmitter.emit('transaction.requires_approval', transaction);
-        }
+            // Only do account updates inside the transaction
+            if (!isHighValue) {
+                const updated = await this.processTransaction(txRecord.id, tx, userId);
+                return updated;
+            }
+
+            return txRecord;
+        }, { timeout: 10000 }); // optional: increase timeout to 10s
+
+        // Emit events outside transaction (non-blocking)
+        if (isHighValue) this.eventEmitter.emit('transaction.requires_approval', transaction);
 
         return transaction;
     }
 
-    // Process transaction (debit and credit accounts)
-    private async processTransaction(transactionId: string) {
-        return await this.prisma.$transaction(async (tx) => {
-            // Get transaction with lock
-            const transaction = await tx.transaction.findUnique({
-                where: { id: transactionId },
-                include: {
-                    fromAccount: {
-                        include: { user: true }
-                    },
-                    toAccount: {
-                        include: { user: true }
-                    }
-                }
-            });
+    // Process transaction: only DB updates here    
+    private async processTransaction(
+        transactionId: string,
+        tx: Prisma.TransactionClient,
+        processedBy?: string
+    ) {
+        const transaction = await tx.transaction.findUnique({
+            where: { id: transactionId },
+            include: {
+                fromAccount: { include: { user: true } },
+                toAccount: { include: { user: true } },
+            },
+        });
 
-            if (!transaction || transaction.status !== TransactionStatus.PENDING) {
-                throw new BadRequestException('Transaction cannot be processed');
-            }
+        if (!transaction || transaction.status !== TransactionStatus.PENDING)
+            throw new BadRequestException('Transaction cannot be processed');
+        if (!transaction.fromAccountId || !transaction.toAccountId)
+            throw new BadRequestException('Invalid transaction accounts');
 
-            // Ensure account IDs are not null
-            if (!transaction.fromAccountId || !transaction.toAccountId) {
-                throw new BadRequestException('Invalid transaction accounts');
-            }
+        const amount = new Decimal(transaction.amount).toNumber();
+        const fee = new Decimal(transaction.fee || 0).toNumber();
+        const totalDebit = amount + fee;
 
-            // Convert amount and fee to numbers for arithmetic operations
-            const amount = new Decimal(transaction.amount).toNumber();
-            const fee = new Decimal(transaction.fee || 0).toNumber();
-            const totalDebit = amount + fee;
+        // Update balances inside transaction
+        await tx.account.update({
+            where: { id: transaction.fromAccountId },
+            data: { balance: { decrement: totalDebit } },
+        });
 
-            // Update accounts
-            await tx.account.update({
-                where: { id: transaction.fromAccountId },
-                data: { balance: { decrement: totalDebit } }
-            });
+        await tx.account.update({
+            where: { id: transaction.toAccountId },
+            data: { balance: { increment: amount } },
+        });
 
-            await tx.account.update({
-                where: { id: transaction.toAccountId },
-                data: { balance: { increment: amount } }
-            });
-
-            // Update transaction status
-            const updatedTransaction = await tx.transaction.update({
-                where: { id: transactionId },
-                data: {
-                    status: TransactionStatus.COMPLETED,
-                    metadata: {
-                        ...(transaction.metadata as any),
-                        processedAt: new Date().toISOString()
-                    }
+        const updatedTransaction = await tx.transaction.update({
+            where: { id: transactionId },
+            data: {
+                status: TransactionStatus.COMPLETED,
+                metadata: {
+                    ...(transaction.metadata as any),
+                    processedAt: new Date().toISOString(),
+                    processedBy,
                 },
-                include: {
-                    fromAccount: {
-                        include: { user: true }
-                    },
-                    toAccount: {
-                        include: { user: true }
-                    }
-                }
-            });
+            },
+            include: {
+                fromAccount: { include: { user: true } },
+                toAccount: { include: { user: true } },
+            },
+        });
 
-            // Emit events
+        // Emit notifications outside transaction
+        setImmediate(() => {
             this.eventEmitter.emit('transaction.completed', updatedTransaction);
 
             if (updatedTransaction.fromAccount?.user) {
@@ -609,34 +563,38 @@ export class TransactionsService {
                     userId: updatedTransaction.fromAccount.user.id,
                     type: 'DEBIT',
                     amount: updatedTransaction.amount,
-                    transactionId: updatedTransaction.id
+                    transactionId: updatedTransaction.id,
                 });
             }
-
             if (updatedTransaction.toAccount?.user) {
                 this.eventEmitter.emit('notification.transaction', {
                     userId: updatedTransaction.toAccount.user.id,
                     type: 'CREDIT',
                     amount: updatedTransaction.amount,
-                    transactionId: updatedTransaction.id
+                    transactionId: updatedTransaction.id,
                 });
             }
-
-            return updatedTransaction;
         });
+
+        return updatedTransaction;
     }
 
-    // Confirm transaction for amount greater than 500,000 FCFA
-    async confirmTransaction(transactionId: string, confirmTransactionDto: ConfirmTransactionDto, userId: string) {
+
+
+    async confirmTransaction(
+        transactionId: string,
+        confirmTransactionDto: ConfirmTransactionDto,
+        userId: string
+    ) {
         const { approved, reason } = confirmTransactionDto;
 
+        // Find transaction
         const transaction = await this.prisma.transaction.findUnique({
             where: { id: transactionId },
             include: {
-                fromAccount: {
-                    include: { user: true }
-                }
-            }
+                fromAccount: { include: { user: true } },
+                toAccount: { include: { user: true } },
+            },
         });
 
         if (!transaction) {
@@ -647,51 +605,76 @@ export class TransactionsService {
             throw new BadRequestException('Transaction does not require approval');
         }
 
-        // Check if user has permission to approve transactions
+        // Check if user can approve transactions
         const canApprove = await this.canApproveTransactions(userId);
         if (!canApprove) {
             throw new ForbiddenException('You do not have permission to approve transactions');
         }
 
         if (approved) {
-            // Process the transaction
-            return await this.processTransaction(transactionId);
+            // ✅ Process transaction inside a Prisma transaction
+            return await this.prisma.$transaction(async (tx) => {
+                // Mark transaction as PENDING first to ensure proper locking
+                await tx.transaction.update({
+                    where: { id: transactionId },
+                    data: {
+                        status: TransactionStatus.PENDING,
+                        metadata: {
+                            ...(transaction.metadata as any),
+                            approvedBy: userId,
+                            approvedAt: new Date().toISOString(),
+                        },
+                    },
+                });
+
+                // Process the transaction using the updated processTransaction
+                return this.processTransaction(transactionId, tx);
+            });
         } else {
-            // Update transaction status to rejected
+            // Reject the transaction
             const rejectedTransaction = await this.prisma.transaction.update({
                 where: { id: transactionId },
                 data: {
-                    status: TransactionStatus.FAILED, // Using FAILED instead of REJECTED
+                    status: TransactionStatus.FAILED, // or REJECTED if you prefer
                     metadata: {
                         ...(transaction.metadata as any),
                         rejectionReason: reason,
                         approvedBy: userId,
-                        rejectedAt: new Date().toISOString()
-                    }
+                        rejectedAt: new Date().toISOString(),
+                    },
                 },
                 include: {
-                    fromAccount: {
-                        include: { user: true }
-                    }
-                }
+                    fromAccount: { include: { user: true } },
+                    toAccount: { include: { user: true } },
+                },
             });
 
             // Emit event for rejected transaction
-            this.eventEmitter.emit('transaction.rejected', rejectedTransaction);
+            this.eventEmitter.emit('transaction.rejected', {
+                transactionId: rejectedTransaction.id,
+                fromUserId: rejectedTransaction.fromAccount?.user?.id,
+                toUserId: rejectedTransaction.toAccount?.user?.id,
+                amount: rejectedTransaction.amount,
+                status: rejectedTransaction.status,
+                reason,
+            });
 
+            // Emit user notification
             if (rejectedTransaction.fromAccount?.user) {
                 this.eventEmitter.emit('notification.transaction', {
                     userId: rejectedTransaction.fromAccount.user.id,
                     type: 'TRANSACTION_REJECTED',
                     amount: rejectedTransaction.amount,
                     transactionId: rejectedTransaction.id,
-                    reason
+                    reason,
                 });
             }
 
             return rejectedTransaction;
         }
     }
+
+
 
     // Check if user can approve transactions
     private async canApproveTransactions(userId: string): Promise<boolean> {

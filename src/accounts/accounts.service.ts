@@ -806,4 +806,313 @@ export class AccountsService {
 
     return new PaginatedResponse(data, total, dto);
   }
+
+
+
+
+
+  // Add these methods to your AccountsService class
+
+  /**
+   * Get total income from successful deposits for a user
+   */
+  async getTotalIncome(userId: string, startDate?: Date, endDate?: Date) {
+    const whereClause: any = {
+      userId: userId,
+      type: 'DEPOSIT',
+      status: 'SUCCESS'
+    };
+
+    // Add date range if provided
+    if (startDate || endDate) {
+      whereClause.createdAt = {};
+      if (startDate) whereClause.createdAt.gte = startDate;
+      if (endDate) whereClause.createdAt.lte = endDate;
+    }
+
+    const result = await this.prisma.transaction.aggregate({
+      where: whereClause,
+      _sum: {
+        amount: true
+      }
+    });
+
+    return {
+      totalIncome: result._sum.amount || 0,
+      userId: userId,
+      period: startDate && endDate ? { startDate, endDate } : 'all-time'
+    };
+  }
+
+  /**
+   * Get total expenses from successful transfers and withdrawals for a user
+   */
+  async getTotalExpenses(userId: string, startDate?: Date, endDate?: Date) {
+    const whereClause: any = {
+      userId: userId,
+      type: { in: ['TRANSFER', 'WITHDRAWAL'] },
+      status: 'SUCCESS'
+    };
+
+    // Add date range if provided
+    if (startDate || endDate) {
+      whereClause.createdAt = {};
+      if (startDate) whereClause.createdAt.gte = startDate;
+      if (endDate) whereClause.createdAt.lte = endDate;
+    }
+
+    const result = await this.prisma.transaction.aggregate({
+      where: whereClause,
+      _sum: {
+        amount: true
+      }
+    });
+
+    return {
+      totalExpenses: result._sum.amount || 0,
+      userId: userId,
+      period: startDate && endDate ? { startDate, endDate } : 'all-time'
+    };
+  }
+
+  /**
+   * Get comprehensive financial summary for a user
+   */
+  async getFinancialSummary(userId: string, startDate?: Date, endDate?: Date) {
+    const [totalIncome, totalExpenses, totalBalance, availableFunds] = await Promise.all([
+      this.getTotalIncome(userId, startDate, endDate),
+      this.getTotalExpenses(userId, startDate, endDate),
+      this.getUserTotalBalance(userId),
+      this.getAvailableFunds(userId)
+    ]);
+
+    const netFlow = new Prisma.Decimal(totalIncome.totalIncome).minus(totalExpenses.totalExpenses);
+
+    return {
+      userId,
+      period: startDate && endDate ? { startDate, endDate } : 'all-time',
+      income: totalIncome,
+      expenses: totalExpenses,
+      netFlow: netFlow.toNumber(),
+      currentBalance: totalBalance,
+      availableFunds: availableFunds,
+      summary: {
+        totalIncome: totalIncome.totalIncome,
+        totalExpenses: totalExpenses.totalExpenses,
+        netFlow: netFlow.toNumber(),
+        currentBalance: totalBalance.totalBalance,
+        availableFunds: availableFunds.availableFunds
+      }
+    };
+  }
+
+  /**
+   * Get income and expenses breakdown by type
+   */
+  async getTransactionBreakdown(userId: string, startDate?: Date, endDate?: Date) {
+    const whereClause: any = {
+      userId: userId,
+      status: 'SUCCESS'
+    };
+
+    // Add date range if provided
+    if (startDate || endDate) {
+      whereClause.createdAt = {};
+      if (startDate) whereClause.createdAt.gte = startDate;
+      if (endDate) whereClause.createdAt.lte = endDate;
+    }
+
+    const breakdown = await this.prisma.transaction.groupBy({
+      by: ['type'],
+      where: whereClause,
+      _sum: {
+        amount: true
+      },
+      _count: {
+        id: true
+      }
+    });
+
+    // Separate income and expenses
+    const incomeTypes = ['DEPOSIT'];
+    const expenseTypes = ['TRANSFER', 'WITHDRAWAL'];
+
+    const income = breakdown.filter(item => incomeTypes.includes(item.type));
+    const expenses = breakdown.filter(item => expenseTypes.includes(item.type));
+
+    return {
+      userId,
+      period: startDate && endDate ? { startDate, endDate } : 'all-time',
+      income: income.map(item => ({
+        type: item.type,
+        totalAmount: item._sum.amount || 0,
+        transactionCount: item._count.id
+      })),
+      expenses: expenses.map(item => ({
+        type: item.type,
+        totalAmount: item._sum.amount || 0,
+        transactionCount: item._count.id
+      }))
+    };
+  }
+
+  /**
+   * Get monthly income and expenses for charts
+   */
+  async getMonthlyFinancialData(userId: string, months: number = 12) {
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setMonth(startDate.getMonth() - months);
+
+    // Get all successful transactions in the date range
+    const transactions = await this.prisma.transaction.findMany({
+      where: {
+        userId: userId,
+        status: 'SUCCESS',
+        createdAt: {
+          gte: startDate,
+          lte: endDate
+        }
+      },
+      select: {
+        type: true,
+        amount: true,
+        createdAt: true
+      },
+      orderBy: {
+        createdAt: 'asc'
+      }
+    });
+
+    // Group by month and type
+    const monthlyData: { [key: string]: { income: number; expenses: number } } = {};
+
+    transactions.forEach(transaction => {
+      const monthKey = transaction.createdAt.toISOString().substring(0, 7); // YYYY-MM
+
+      if (!monthlyData[monthKey]) {
+        monthlyData[monthKey] = { income: 0, expenses: 0 };
+      }
+
+      if (transaction.type === 'DEPOSIT') {
+        monthlyData[monthKey].income += transaction.amount.toNumber();
+      } else if (['TRANSFER', 'WITHDRAWAL'].includes(transaction.type)) {
+        monthlyData[monthKey].expenses += transaction.amount.toNumber();
+      }
+    });
+
+    // Convert to array format
+    const result = Object.entries(monthlyData).map(([month, data]) => ({
+      month,
+      income: data.income,
+      expenses: data.expenses,
+      net: data.income - data.expenses
+    }));
+
+    return {
+      userId,
+      period: { startDate, endDate },
+      monthlyData: result
+    };
+  }
+
+  /**
+   * Get admin overview of total platform income and expenses
+   */
+  async getPlatformFinancialOverview(startDate?: Date, endDate?: Date) {
+    const whereClause: any = {
+      status: 'SUCCESS'
+    };
+
+    // Add date range if provided
+    if (startDate || endDate) {
+      whereClause.createdAt = {};
+      if (startDate) whereClause.createdAt.gte = startDate;
+      if (endDate) whereClause.createdAt.lte = endDate;
+    }
+
+    const [deposits, transfers, withdrawals, totalFees] = await Promise.all([
+      // Total deposits (income)
+      this.prisma.transaction.aggregate({
+        where: {
+          ...whereClause,
+          type: 'DEPOSIT'
+        },
+        _sum: {
+          amount: true
+        },
+        _count: {
+          id: true
+        }
+      }),
+
+      // Total transfers (expenses)
+      this.prisma.transaction.aggregate({
+        where: {
+          ...whereClause,
+          type: 'TRANSFER'
+        },
+        _sum: {
+          amount: true
+        },
+        _count: {
+          id: true
+        }
+      }),
+
+      // Total withdrawals (expenses)
+      this.prisma.transaction.aggregate({
+        where: {
+          ...whereClause,
+          type: 'WITHDRAWAL'
+        },
+        _sum: {
+          amount: true
+        },
+        _count: {
+          id: true
+        }
+      }),
+
+      // Total fees collected
+      this.prisma.transaction.aggregate({
+        where: {
+          ...whereClause,
+          fee: { gt: 0 }
+        },
+        _sum: {
+          fee: true
+        }
+      })
+    ]);
+
+    const totalIncome = deposits._sum.amount || 0;
+    const totalExpenses = new Prisma.Decimal(transfers._sum.amount || 0)
+      .plus(withdrawals._sum.amount || 0);
+
+    return {
+      period: startDate && endDate ? { startDate, endDate } : 'all-time',
+      income: {
+        total: totalIncome,
+        depositCount: deposits._count.id,
+        breakdown: {
+          deposits: deposits._sum.amount || 0
+        }
+      },
+      expenses: {
+        total: totalExpenses.toNumber(),
+        breakdown: {
+          transfers: transfers._sum.amount || 0,
+          withdrawals: withdrawals._sum.amount || 0
+        },
+        transactionCount: transfers._count.id + withdrawals._count.id
+      },
+      fees: {
+        total: totalFees._sum.fee || 0
+      },
+      netFlow: new Prisma.Decimal(totalIncome).minus(totalExpenses).toNumber()
+    };
+  }
+
+ 
 }

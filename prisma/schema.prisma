@@ -1,238 +1,238 @@
-generator client {
-  provider = "prisma-client-js"
-}
+  generator client {
+    provider = "prisma-client-js"
+  }
 
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-}
+  datasource db {
+    provider = "postgresql"
+    url      = env("DATABASE_URL")
+  }
 
-//
-// ====================
-// ENUMS
-// ====================
-enum RoleType {
-  USER
-  MEMBER
-  TELLER
-  LOAN_OFFICER
-  CREDIT_COMMITTEE
-  FINANCE_OFFICER
-  COMPLIANCE_OFFICER
-  BRANCH_MANAGER
-  ADMIN
-  SUPPORT
-}
+  //
+  // ====================
+  // ENUMS
+  // ====================
+  enum RoleType {
+    USER
+    MEMBER
+    TELLER
+    LOAN_OFFICER
+    CREDIT_COMMITTEE
+    FINANCE_OFFICER
+    COMPLIANCE_OFFICER
+    BRANCH_MANAGER
+    ADMIN
+    SUPPORT
+  }
 
-enum AccountType {
-  EPARGNE
-  COURANT
-  NDJANGUI
-  CHEQUE
-  PLACEMENT
-}
+  enum AccountType {
+    EPARGNE
+    COURANT
+    NDJANGUI
+    CHEQUE
+    PLACEMENT
+  }
 
-enum TransactionType {
-  DEPOSIT
-  WITHDRAWAL
-  TRANSFER
-  FEE
-  INTEREST
-}
+  enum TransactionType {
+    DEPOSIT
+    WITHDRAWAL
+    TRANSFER
+    FEE
+    INTEREST
+  }
 
-enum TransactionStatus {
-  PENDING_APPROVAL
-  COMPLETED
-  PENDING
-  SUCCESS
-  FAILED
-  REVERSED
-}
+  enum TransactionStatus {
+    PENDING_APPROVAL
+    COMPLETED
+    PENDING
+    SUCCESS
+    FAILED
+    REVERSED
+  }
 
-enum VerificationStatus {
-  PENDING
-  APPROVED
-  REJECTED
-}
+  enum VerificationStatus {
+    PENDING
+    APPROVED
+    REJECTED
+  }
 
-enum DocumentType {
-  CNI
-  PASSPORT
-}
+  enum DocumentType {
+    CNI
+    PASSPORT
+  }
 
-//
-// ====================
-// MODELS
-// ====================
-model User {
-  id       String   @id @default(uuid())
-  email    String   @unique
-  username String?  @unique
-  password String
-  roleType RoleType @default(USER)
+  //
+  // ====================
+  // MODELS
+  // ====================
+  model User {
+    id       String   @id @default(uuid())
+    email    String   @unique
+    username String?  @unique
+    password String
+    roleType RoleType @default(USER)
 
-  profile      Profile?
-  contacts     EmergencyContact[]
-  accounts     Account[]
-  jointInfo    JointAccountInfo?
-  documents    Document?
-  verification Verification? // ✅ only one verification per user
-  transactions Transaction[]
-  auditLogs    AuditLog[]
+    profile      Profile?
+    contacts     EmergencyContact[]
+    accounts     Account[]
+    jointInfo    JointAccountInfo?
+    documents    Document?
+    verification Verification? // ✅ only one verification per user
+    transactions Transaction[]
+    auditLogs    AuditLog[]
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+  }
 
-model Profile {
-  id     String @id @default(uuid())
-  userId String @unique
-  user   User   @relation(fields: [userId], references: [id])
+  model Profile {
+    id     String @id @default(uuid())
+    userId String @unique
+    user   User   @relation(fields: [userId], references: [id])
 
-  firstName     String?
-  lastName      String?
-  birthDate     DateTime?
-  birthPlace    String?
-  nationality   String?
-  resident      String?
-  ppe           String?
-  idNumber      String?
-  idIssuer      String?
-  idDate        DateTime?
-  phone         String?
-  address       String?
-  city          String?
-  profession    String?
-  employer      String?
-  maritalStatus String?
-  children      Int?
-  salary        Decimal?  @db.Decimal(10, 2)
+    firstName     String?
+    lastName      String?
+    birthDate     DateTime?
+    birthPlace    String?
+    nationality   String?
+    resident      String?
+    ppe           String?
+    idNumber      String?
+    idIssuer      String?
+    idDate        DateTime?
+    phone         String?
+    address       String?
+    city          String?
+    profession    String?
+    employer      String?
+    maritalStatus String?
+    children      Int?
+    salary        Decimal?  @db.Decimal(10, 2)
 
-  signature     String?
-  termsAccepted Boolean? @default(false)
-}
+    signature     String?
+    termsAccepted Boolean? @default(false)
+  }
 
-model EmergencyContact {
-  id     String @id @default(uuid())
-  userId String
-  user   User   @relation(fields: [userId], references: [id])
+  model EmergencyContact {
+    id     String @id @default(uuid())
+    userId String
+    user   User   @relation(fields: [userId], references: [id])
 
-  name     String
-  phone    String
-  email    String?
-  relation String
-}
+    name     String
+    phone    String
+    email    String?
+    relation String
+  }
 
-model Account {
-  id     String @id @default(uuid())
-  userId String
-  user   User   @relation(fields: [userId], references: [id])
+  model Account {
+    id     String @id @default(uuid())
+    userId String
+    user   User   @relation(fields: [userId], references: [id])
 
-  type    AccountType
-  balance Decimal     @default(0.00) @db.Decimal(18, 2)
-  active  Boolean     @default(true)
-  rib     String?      @unique
+    type    AccountType
+    balance Decimal     @default(0.00) @db.Decimal(18, 2)
+    active  Boolean     @default(true)
+    rib     String?      @unique
 
-  outgoingTransactions Transaction[] @relation("FromAccountTransactions")
-  incomingTransactions Transaction[] @relation("ToAccountTransactions")
+    outgoingTransactions Transaction[] @relation("FromAccountTransactions")
+    incomingTransactions Transaction[] @relation("ToAccountTransactions")
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
-}
+    createdAt DateTime @default(now())
+    updatedAt DateTime @default(now()) @updatedAt
+  }
 
-model JointAccountInfo {
-  id     String @id @default(uuid())
-  userId String @unique
-  user   User   @relation(fields: [userId], references: [id])
-  status String @default("INACTIVE")
+  model JointAccountInfo {
+    id     String @id @default(uuid())
+    userId String @unique
+    user   User   @relation(fields: [userId], references: [id])
+    status String @default("INACTIVE")
 
-  accountType       String?
-  holder1Name       String?
-  holder1Phone      String?
-  holder1Niu        String?
-  holder1Email      String?
-  holder1Address    String?
-  holder1Profession String?
-  holder1Employer   String?
-  holder1IdNumber   String?
-  holder1IdIssuer   String?
-  holder1IdDate     DateTime?
+    accountType       String?
+    holder1Name       String?
+    holder1Phone      String?
+    holder1Niu        String?
+    holder1Email      String?
+    holder1Address    String?
+    holder1Profession String?
+    holder1Employer   String?
+    holder1IdNumber   String?
+    holder1IdIssuer   String?
+    holder1IdDate     DateTime?
 
-  holder2Name       String?
-  holder2Phone      String?
-  holder2Niu        String?
-  holder2Email      String?
-  holder2Address    String?
-  holder2Profession String?
-  holder2Employer   String?
-  holder2IdNumber   String?
-  holder2IdIssuer   String?
-  holder2IdDate     DateTime?
+    holder2Name       String?
+    holder2Phone      String?
+    holder2Niu        String?
+    holder2Email      String?
+    holder2Address    String?
+    holder2Profession String?
+    holder2Employer   String?
+    holder2IdNumber   String?
+    holder2IdIssuer   String?
+    holder2IdDate     DateTime?
 
-  signatureType  String?
-  signature1     String?
-  signature2     String?
-  declaration    Boolean? @default(false)
-  terms1Accepted Boolean? @default(false)
-  terms2Accepted Boolean? @default(false)
-}
+    signatureType  String?
+    signature1     String?
+    signature2     String?
+    declaration    Boolean? @default(false)
+    terms1Accepted Boolean? @default(false)
+    terms2Accepted Boolean? @default(false)
+  }
 
-model Document {
-  id     String @id @default(uuid())
-  userId String @unique
-  user   User   @relation(fields: [userId], references: [id])
+  model Document {
+    id     String @id @default(uuid())
+    userId String @unique
+    user   User   @relation(fields: [userId], references: [id])
 
-  type       String @default("CNI")
+    type       String @default("CNI")
 
-  frontImage String?
-  backImage  String?
-}
+    frontImage String?
+    backImage  String?
+  }
 
-model Transaction {
-  id     String            @id @default(uuid())
-  type   TransactionType
-  status TransactionStatus @default(PENDING)
+  model Transaction {
+    id     String            @id @default(uuid())
+    type   TransactionType
+    status TransactionStatus @default(PENDING)
 
-  amount      Decimal @db.Decimal(18, 2)
-  fee         Decimal?  @db.Decimal(9, 2) @default(0.00)
-  description String?
+    amount      Decimal @db.Decimal(18, 2)
+    fee         Decimal?  @db.Decimal(9, 2) @default(0.00)
+    description String?
 
-  fromAccountId String?
-  fromAccount   Account? @relation("FromAccountTransactions", fields: [fromAccountId], references: [id])
+    fromAccountId String?
+    fromAccount   Account? @relation("FromAccountTransactions", fields: [fromAccountId], references: [id])
 
-  toAccountId String?
-  toAccount   Account? @relation("ToAccountTransactions", fields: [toAccountId], references: [id])
+    toAccountId String?
+    toAccount   Account? @relation("ToAccountTransactions", fields: [toAccountId], references: [id])
 
-  userId String?
-  user   User?   @relation(fields: [userId], references: [id])
+    userId String?
+    user   User?   @relation(fields: [userId], references: [id])
 
-  metadata  Json?
+    metadata  Json?
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+  }
 
-model Verification {
-  id     String @id @default(uuid())
-  userId String @unique
-  user   User   @relation(fields: [userId], references: [id])
+  model Verification {
+    id     String @id @default(uuid())
+    userId String @unique
+    user   User   @relation(fields: [userId], references: [id])
 
-  status     VerificationStatus @default(PENDING)
-  verifiedBy String?
-  verifiedAt DateTime?
-  notes      String?
+    status     VerificationStatus @default(PENDING)
+    verifiedBy String?
+    verifiedAt DateTime?
+    notes      String?
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+  }
 
-model AuditLog {
-  id        String   @id @default(uuid())
-  action    String
-  entity    String
-  entityId  String
-  userId    String?
-  user      User?    @relation(fields: [userId], references: [id])
-  timestamp DateTime @default(now())
-  metadata  Json?
-}
+  model AuditLog {
+    id        String   @id @default(uuid())
+    action    String
+    entity    String
+    entityId  String
+    userId    String?
+    user      User?    @relation(fields: [userId], references: [id])
+    timestamp DateTime @default(now())
+    metadata  Json?
+  }

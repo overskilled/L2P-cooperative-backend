@@ -198,6 +198,25 @@ export class AuthService {
 
         await this.mailerService.sendWelcomeEmail(user.email, user.profile?.firstName!);
 
+        const adminUsers = await this.prismaService.user.findMany({
+            where: { roleType: 'ADMIN' }, 
+            select: { email: true }
+        });
+
+        if (adminUsers.length > 0) {
+            const adminEmails = adminUsers.map(admin => admin.email);
+            await this.mailerService.sendNewSignupNotificationToAdmins(
+                adminEmails,
+                {
+                    firstName: dto.firstName!,
+                    lastName: dto.lastName!,
+                    email: dto.email,
+                    signupDate: new Date().toLocaleDateString(),
+                    userId: user.id
+                }
+            );
+        }
+
         return { accessToken, userId: user.id, username: user.username ?? user.email, user: safeUser };
     }
 
@@ -243,7 +262,7 @@ export class AuthService {
         // Use transaction to ensure all deletions succeed or none do
         return await this.prismaService.$transaction(async (prisma) => {
             // Delete related records in the correct order (respecting foreign key constraints)
-            
+
             // Delete verification record
             if (user.verification) {
                 await prisma.verification.deleteMany({

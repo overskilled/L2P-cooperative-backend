@@ -246,4 +246,91 @@ export class MailerService {
             html,
         });
     }
+
+    async sendNewSignupNotificationToAdmins(
+        adminEmails: string[], 
+        userData: {
+            firstName: string;
+            lastName: string;
+            email: string;
+            signupDate: string;
+            userId: string;
+        }
+    ) {
+        const subject = `New User Signup - ${userData.firstName} ${userData.lastName} Requires Verification`;
+        const adminDashboardLink = `https://l2p-blue.vercel.app/admin/kyc`;
+
+        const html = `
+        <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #222;">
+            <table width="100%" style="max-width: 600px; margin: auto; border: 1px solid #eee; border-radius: 12px; overflow: hidden;">
+            <tr>
+                <td style="background: #ff9800; padding: 20px; text-align: center; color: white;">
+                <h1 style="margin: 0; font-size: 22px;">L2P Cooperative - Admin Notification</h1>
+                </td>
+            </tr>
+            <tr>
+                <td style="padding: 25px;">
+                <h2 style="margin-top: 0; color: #ff9800;">New User Signup Requires Review</h2>
+                <p>Hello Admin,</p>
+                
+                <p>A new user has signed up for L2P Cooperative and is awaiting verification.</p>
+                
+                <div style="background: #fff3cd; padding: 15px; border: 1px solid #ffeaa7; border-radius: 6px; margin: 20px 0;">
+                    <h3 style="margin-top: 0; color: #856404;">User Details:</h3>
+                    <table style="width: 100%;">
+                        <tr>
+                            <td style="padding: 8px 0; font-weight: bold; width: 120px;">Name:</td>
+                            <td style="padding: 8px 0;">${userData.firstName} ${userData.lastName}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; font-weight: bold;">Email:</td>
+                            <td style="padding: 8px 0;">${userData.email}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; font-weight: bold;">Signup Date:</td>
+                            <td style="padding: 8px 0;">${userData.signupDate}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; font-weight: bold;">Status:</td>
+                            <td style="padding: 8px 0; color: #ff9800; font-weight: bold;">PENDING VERIFICATION</td>
+                        </tr>
+                    </table>
+                </div>
+                
+                <p>Please review the user's application and documents in the admin dashboard:</p>
+                
+                <p style="text-align: center; margin: 30px 0;">
+                    <a href="${adminDashboardLink}" style="background: #ff9800; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-size: 16px;">
+                    Review User Application
+                    </a>
+                </p>
+                
+                <p>If the button doesn't work, copy and paste this link into your browser:</p>
+                <p style="word-break: break-all; color: #004aad;">${adminDashboardLink}</p>
+                
+                <p style="margin-top: 30px;">Thank you,<br/>L2P Cooperative System</p>
+                </td>
+            </tr>
+            <tr>
+                <td style="background: #f5f5f5; text-align: center; padding: 15px; font-size: 12px; color: #888;">
+                © ${new Date().getFullYear()} L2P Cooperative. All rights reserved.
+                </td>
+            </tr>
+            </table>
+        </div>
+        `;
+
+        // Send to all admin emails
+        await Promise.all(
+            adminEmails.map(email =>
+                this.resend.emails.send({
+                    from: "L2P Cooperative <admin-notifications@nanosatellitemissions.com>",
+                    to: email,
+                    subject,
+                    html,
+                })
+            )
+        );
+    }
+
 }
