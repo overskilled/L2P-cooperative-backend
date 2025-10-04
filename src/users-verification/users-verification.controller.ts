@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Query, Req, UseGuards } from '@nestjs/common';
 import { UsersVerificationService } from './users-verification.service';
 import { AuthGuard } from 'src/auth/guards/auth.guard';
 import { ApiQuery } from '@nestjs/swagger';
@@ -7,6 +7,20 @@ import { PaginationDto } from 'src/dto/pagination.dto';
 @Controller('users-verification')
 export class UsersVerificationController {
   constructor(private readonly verificationService: UsersVerificationService) { }
+
+  @Get('verification-stats')
+  @UseGuards(AuthGuard)
+  getVerificationCount(
+  ) {
+    return this.verificationService.getVerificationCounts();
+  }
+  
+  @Get('pending-verifications')
+  @UseGuards(AuthGuard)
+  getPendingVerificationCount(
+  ) {
+    return this.verificationService.getPendingVerificationCount();
+  }
 
   @Get()
   @UseGuards(AuthGuard)
@@ -42,4 +56,6 @@ export class UsersVerificationController {
   ) {
     return this.verificationService.rejectVerification(userId, verifiedBy, body.notes);
   }
+
+  
 }

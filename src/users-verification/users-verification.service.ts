@@ -69,11 +69,33 @@ export class UsersVerificationService {
         return verification;
     }
 
+    // Get verification counts
+    async getVerificationCounts() {
+        const [totalVerificationCount, completeCount, rejectedCount] = await Promise.all([
+            this.prisma.verification.count(),
+            this.prisma.verification.count({ where: { status: 'APPROVED' } }),
+            this.prisma.verification.count({ where: { status: 'REJECTED' } }),
+        ]);
+
+        return {
+            totalVerificationCount,
+            completeCount,
+            rejectedCount,
+        };
+    }
+
+    async getPendingVerificationCount() {
+        return this.prisma.verification.count({ where: { status: 'PENDING' } });
+    }
+
     // Approve a verification
     async approveVerification(userId: string, verifiedBy: string) {
+        console.log("Approving verification for userId:", userId, "by verifier:", verifiedBy);
+
+
         if (!verifiedBy) {
             throw new BadRequestException('verifiedBy is required to approve verification');
-        }
+        } 
 
         // Check if the verifier is an admin
         const verifier = await this.prisma.user.findUnique({

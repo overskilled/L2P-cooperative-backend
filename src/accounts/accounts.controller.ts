@@ -30,7 +30,7 @@ export class AccountsController {
     @Query('agencyId') agencyId: string,
     @Req() req
   ) {
-    
+
     return this.accountsService.openAccount(req.user.id, type, bankId, agencyId);
   }
 
@@ -197,6 +197,7 @@ export class AccountsController {
    * Get transaction breakdown by type for a user
    */
   @Get('users/:userId/transaction-breakdown')
+  @UseGuards(AuthGuard)
   async getTransactionBreakdown(
     @Req() req,
     @Query('startDate') startDate?: string,
@@ -233,8 +234,9 @@ export class AccountsController {
    * Get current user's financial data (using token)
    */
   @Get('me/financial-summary')
+  @UseGuards(AuthGuard)
   async getMyFinancialSummary(
-    @Req() req: any,
+    @Req() req,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
   ) {
@@ -252,6 +254,7 @@ export class AccountsController {
    * Get current user's income
    */
   @Get('me/income')
+  @UseGuards(AuthGuard)
   async getMyIncome(
     @Req() req,
     @Query('startDate') startDate?: string,
@@ -271,8 +274,9 @@ export class AccountsController {
    * Get current user's expenses
    */
   @Get('me/expenses')
+  @UseGuards(AuthGuard)
   async getMyExpenses(
-    @Req() req: any,
+    @Req() req,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
   ) {
